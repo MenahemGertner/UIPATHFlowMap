@@ -1,0 +1,1321 @@
+<!--
+  File Drawer - self-contained fragment injected into project_map.html by report.py,
+  via the same plain-text placeholder swap already used for ai_panel.html and
+  edge_tooltip_fragment.html. Extracted from project_map.html because it had grown
+  into its own large, self-contained "panel" - the side drawer that shows a
+  selected file's activity flow, variables, and invoke relationships - not core
+  map/graph rendering.
+
+  NOTE: this file must never contain the literal placeholder token that report.py
+  searches for (spelled out fully, double-underscore-wrapped) anywhere in its own
+  text, including comments - report.py's substitution is a blind string
+  search/replace, so a stray literal occurrence here would either be matched and
+  corrupted, or left sitting unreplaced in the output. Describe such tokens in
+  prose instead of spelling them out, as done here and in the sibling fragments.
+
+  Depends on globals declared in the main script block (project_map.html):
+    - escapeHtml(s)                          - shared HTML-escaping helper
+    - directionMeta(dir), directionLabel(dir) - from the edge-tooltip fragment;
+      argument direction pills (In/Out/In-Out/Property) are shown both in the
+      edge tooltip and here in the drawer's activity-flow argument rows, so the
+      two fragments share this logic rather than duplicating it.
+    - notesStore, editMode, showFullFlow, currentDrawerFile, network - state
+      owned by the main script; this fragment reads and writes them directly.
+    - fullViewToggle - looked up by openDrawer/setActiveTrace below, but the
+      element itself and its base "Full View" text/toggle-on styling are wired
+      here too (this fragment owns the button, since it lives inside the drawer
+      markup this file defines).
+
+  Also depends on .dir-pill / .dir-in / .dir-out / .dir-inout / .dir-prop CSS,
+  which stays defined in project_map.html because the edge-tooltip fragment
+  reuses the same classes for its own argument rows.
+-->
+<style>
+  /* --- Drawer shell --- */
+  #drawer {
+    position: absolute;
+    top: 0; bottom: 0; right: 0;
+    width: 380px;
+    background: var(--panel);
+    border-left: 1px solid var(--border);
+    transform: translateX(100%);
+    transition: transform 0.22s ease;
+    z-index: 20;
+    display: flex;
+    flex-direction: column;
+    box-shadow: -12px 0 32px rgba(0,0,0,0.35);
+  }
+  #drawer.open { transform: translateX(0); }
+
+  .drawer-head {
+    padding: 18px 20px 14px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .drawer-head-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 10px;
+  }
+  .drawer-close {
+    background: none; border: none; color: var(--muted);
+    font-size: 18px; cursor: pointer; line-height: 1; padding: 2px;
+  }
+  .drawer-close:hover { color: var(--text); }
+
+  .drawer-filename {
+    font-family: var(--mono);
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text);
+    word-break: break-all;
+  }
+  .drawer-path {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--muted-2);
+    margin-top: 3px;
+  }
+
+  /* .btn's base/hover styling comes from project_map.html - only the disabled
+     state is defined here, since a parse-error file has no single-file AI export
+     to send (see the openDrawer wiring below) and .btn has no disabled style of
+     its own to fall back on. */
+  #dAskAiBtn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  .badge-row { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+
+  /* Houses the Full View / Show Variables toggles inside the drawer's fixed head
+     (rather than the Activity Flow section-title, which lives in the scrollable
+     drawer-body) so they stay visible no matter how far the activity list is
+     scrolled. */
+  .drawer-head-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 10px;
+    flex-wrap: wrap;
+  }
+  .badge {
+    font-family: var(--mono);
+    font-size: 11px;
+    padding: 4px 9px;
+    border-radius: 20px;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    color: var(--muted);
+  }
+  .badge.entry { color: var(--amber); border-color: var(--amber-dim); }
+  .badge.error { color: var(--danger); border-color: var(--danger-dim); }
+
+  .drawer-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 6px 20px 24px;
+  }
+
+  .section { margin-top: 20px; }
+  .section-title {
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    margin-bottom: 9px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .section-title .count { color: var(--muted-2); font-weight: 400; text-transform: none; letter-spacing: 0; }
+
+  .btn.tiny {
+    font-size: 11.5px;
+    padding: 4px 10px;
+    border-radius: 20px;
+  }
+
+  .arg-item, .var-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 12.5px;
+  }
+  .arg-item:last-child, .var-item:last-child { border-bottom: none; }
+
+  .item-name { font-family: var(--mono); color: var(--text); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .item-type { font-family: var(--mono); color: var(--muted-2); font-size: 11px; }
+  .var-scope { font-size: 10px; color: var(--muted-2); background: var(--panel-2); padding: 1px 6px; border-radius: 4px; flex-shrink: 0; }
+
+  .link-list { display: flex; flex-direction: column; gap: 5px; }
+  .link-item {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    color: var(--teal);
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    padding: 7px 10px;
+    border-radius: 7px;
+    cursor: pointer;
+    text-align: left;
+    transition: border-color 0.15s;
+  }
+  .link-item:hover { border-color: var(--teal); }
+  .link-item.dynamic { color: var(--danger); }
+
+  .empty-hint { font-size: 12px; color: var(--muted-2); font-style: italic; }
+
+  .vars-panel {
+    display: none;
+    flex-direction: column;
+    margin-bottom: 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 4px 10px;
+    background: var(--panel-2);
+  }
+  .vars-panel.open { display: flex; }
+
+  /* --- Activity flow diagram (Miro-style) --- */
+  .flow-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .flow-step {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    color: var(--text);
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    padding: 7px 10px;
+  }
+  .flow-branch {
+    border: 1px solid var(--teal-dim);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .flow-branch-head {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--amber);
+    background: var(--scope-head-bg);
+    padding: 8px 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: nowrap;
+  }
+  .flow-branch-kind { flex-shrink: 0; }
+
+  .flow-collapse-toggle {
+    background: none;
+    border: none;
+    color: var(--muted);
+    cursor: pointer;
+    padding: 0 2px 0 0;
+    margin-inline-end: 2px;
+    font-size: 10px;
+    line-height: 1;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    transition: transform 0.15s ease, color 0.15s ease;
+  }
+  .flow-collapse-toggle:hover { color: var(--text); }
+  .flow-branch.collapsed > .flow-branch-head .flow-collapse-toggle {
+    transform: rotate(-90deg);
+  }
+  .flow-branch.collapsed > .flow-branch-body,
+  .flow-branch.collapsed > .flow-branch-args {
+    display: none;
+  }
+  /* .decision branches (If/Switch/Try-Catch) set display:flex on .flow-branch-body
+     further down for the git-graph trunk line - same specificity as the rule above,
+     so without this it wins on source order alone and the collapse toggle silently
+     stops working for decision branches specifically, while still working for plain
+     container branches. Repeating .collapsed here keeps it winning regardless of
+     where either rule sits in the file. */
+  .flow-branch.decision.collapsed > .flow-branch-body {
+    display: none;
+  }
+
+  .flow-step,
+  .flow-branch-kind,
+  .flow-branch-cond,
+  .flow-assign-to,
+  .flow-assign-value,
+  .flow-assign-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+  }
+  .flow-branch-cond { flex: 1; }
+
+  .flow-alt-label {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    margin-bottom: 6px;
+  }
+  .flow-alt-label-text {
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--teal);
+    flex-shrink: 0;
+  }
+  .flow-branch-diamond {
+    width: 9px;
+    height: 9px;
+    background: var(--amber);
+    transform: rotate(45deg);
+    border-radius: 2px;
+    flex-shrink: 0;
+  }
+
+  /* Flowchart-derived decisions (FlowDecision/FlowSwitch) reuse the same If/Switch shape
+     but get a violet accent instead of amber, plus a small "Flowchart" tag - enough to
+     tell at a glance that this branch came from a Flowchart's graph rather than a
+     classic nested If/Switch, without looking like a wholly different kind of thing. */
+  .flow-branch-head.flow-branch-head-flowchart {
+    color: var(--violet);
+    background: var(--scope-head-flowchart-bg);
+  }
+  .flow-branch-head-flowchart .flow-branch-diamond {
+    background: var(--violet);
+    border-radius: 50%;
+    transform: none;
+  }
+  /* While/DoWhile ("kind": "while") aren't a fork between alternatives like If/Switch -
+     they're a single body that repeats - so instead of the amber diamond they get a
+     small loop-arrow glyph, and the git-graph fork lines (.decision's own styling,
+     meant for multiple diverging alternatives) are skipped via the dedicated .loop
+     class below rather than reusing .decision's body styling verbatim. */
+  .flow-branch-head.flow-branch-head-loop {
+    color: var(--teal);
+  }
+  .flow-branch-loop-icon {
+    flex-shrink: 0;
+    display: inline-flex;
+    color: var(--teal);
+  }
+  .flow-branch.loop > .flow-branch-body {
+    padding: 14px;
+  }
+  .flow-branch.loop .flow-alt-label {
+    display: none; /* a loop has exactly one ("Body") branch - the label adds nothing */
+  }
+  .flow-kind-source {
+    font-family: var(--sans);
+    font-size: 9.5px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--violet);
+    background: var(--violet-dim);
+    padding: 1px 6px;
+    border-radius: 999px;
+    flex-shrink: 0;
+  }
+
+  /* git-graph style: a trunk line runs down the body of a decision branch, and each
+     alternative (Then/Else If/Else, Case/Default, Try/Catch/Finally) forks off it with
+     a short horizontal stub - makes the split visually obvious at a glance. */
+  .flow-branch.decision > .flow-branch-body {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 14px;
+  }
+  .flow-branch.decision > .flow-branch-body::before {
+    content: "";
+    position: absolute;
+    left: 9px;
+    top: 0;
+    bottom: 10px;
+    width: 2px;
+    background: var(--teal-dim);
+  }
+  .flow-branch.decision .flow-alt {
+    position: relative;
+    border-left: none;
+    padding-inline-start: 14px;
+  }
+  .flow-branch.decision .flow-alt::before {
+    content: "";
+    position: absolute;
+    left: -9px;
+    top: 11px;
+    width: 12px;
+    height: 2px;
+    background: var(--teal-dim);
+  }
+
+  .flow-assign {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 8px 10px;
+  }
+  .flow-assign-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    overflow: hidden;
+  }
+  .flow-assign-title {
+    font-family: var(--sans);
+    font-size: 10.5px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    color: var(--muted);
+    margin-bottom: 2px;
+  }
+  .flow-assign-to { color: var(--teal); font-weight: 600; flex-shrink: 0; }
+  .flow-assign-eq { color: var(--muted-2); flex-shrink: 0; }
+  .flow-assign-value {
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+  }
+  .flow-empty { font-size: 11.5px; color: var(--muted-2); font-style: italic; padding: 4px 0; }
+
+  .flow-invoke {
+    cursor: pointer;
+    color: var(--teal);
+    border-color: var(--teal-dim);
+    transition: border-color 0.15s, background 0.15s;
+  }
+  .flow-invoke:hover { border-color: var(--teal); background: var(--invoke-hover-bg); }
+  .flow-invoke-warn {
+    color: var(--danger);
+    border-color: var(--danger-dim);
+  }
+
+  /* Type-marker icons: a package icon for activities from an imported/custom library,
+     and a jump-arrow icon on Invoke Workflow File steps - both sit inline right before
+     the step's label so the two call-out types are visible at a glance in the list. */
+  .flow-type-icon {
+    display: inline-block;
+    vertical-align: -1.5px;
+    flex-shrink: 0;
+  }
+  .flow-type-icon-wrap {
+    display: inline-flex;
+    align-items: center;
+    margin-inline-end: 5px;
+    color: var(--amber);
+  }
+  .flow-invoke .flow-type-icon,
+  .flow-invoke-warn .flow-type-icon {
+    margin-inline-end: 5px;
+  }
+  .flow-note {
+    display: inline-block;
+    margin-inline-start: 8px;
+    padding: 1px 6px;
+    border-radius: 5px;
+    font-family: var(--sans);
+    font-size: 11.5px;
+    font-style: italic;
+    color: var(--amber);
+    background: transparent;
+    border: 1px dashed transparent;
+    max-width: 260px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    vertical-align: middle;
+    outline: none;
+  }
+  .flow-note-empty { display: none; } /* view mode: an empty note slot is invisible */
+  body.notes-editable .flow-note-empty {
+    display: inline-block; /* edit mode: show the "+ note" affordance so it can be clicked */
+  }
+  .flow-note-empty::before { content: ""; }
+  body.notes-editable .flow-note-empty::before {
+    content: attr(data-placeholder);
+    color: var(--muted-2);
+    font-style: italic;
+  }
+  .flow-note:not([contenteditable="true"]) { pointer-events: none; }
+  body.notes-editable .flow-note {
+    cursor: text;
+    pointer-events: auto;
+    border-color: var(--muted-2);
+    background: var(--panel-2);
+    white-space: normal;
+    max-width: 320px;
+  }
+  body.notes-editable .flow-note:focus {
+    border-color: var(--amber);
+    background: var(--scope-head-bg);
+  }
+  .flow-step-detailed {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .flow-step.flow-step-detailed {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+  }
+  .flow-step-title {
+    font-family: var(--sans);
+    font-size: 10.5px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    color: var(--muted);
+  }
+  .flow-branch-args {
+    padding: 0 10px 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .flow-arg-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    overflow: hidden;
+    min-width: 0;
+  }
+  .flow-arg-name { color: var(--teal); font-weight: 600; flex-shrink: 0; }
+  .flow-arg-eq { color: var(--muted-2); flex-shrink: 0; }
+  .flow-arg-value {
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+  }
+  .flow-annotation {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    font-family: var(--sans);
+    font-size: 12px;
+    font-style: italic;
+    color: var(--muted);
+    line-height: 1.4;
+    padding: 2px 0 2px 2px;
+    border-inline-start: 2px solid var(--muted-2);
+    margin-inline-start: 1px;
+  }
+  .flow-annotation-icon { flex-shrink: 0; opacity: 0.7; }
+
+  /* --- Variable reference tracing --- */
+  .var-ref {
+    cursor: pointer;
+    border-radius: 3px;
+    padding: 0 2px;
+    text-decoration: underline dotted;
+    text-decoration-color: var(--muted-2);
+  }
+  .var-ref.role-write { color: var(--amber); }
+  .var-ref.role-read { color: var(--teal); }
+  .var-ref.role-readwrite { color: var(--violet); }
+  .var-ref:hover { background: var(--panel-2); }
+  .var-ref.active-trace {
+    background: var(--teal-dim);
+    color: var(--trace-active-color);
+    text-decoration: none;
+  }
+  body.tracing-var .var-ref:not(.active-trace) {
+    opacity: 0.5;
+  }
+
+  #varTraceCard {
+    display: none;
+    position: sticky;
+    top: 0;
+    z-index: 6;
+    background: var(--panel-2);
+    border: 1px solid var(--teal-dim);
+    border-radius: 8px;
+    padding: 10px 30px 10px 12px;
+    margin-bottom: 12px;
+    box-shadow: 0 6px 16px rgba(0,0,0,0.35);
+  }
+  .var-trace-name {
+    font-family: var(--mono);
+    font-weight: 600;
+    color: var(--text);
+    font-size: 13px;
+  }
+  .var-trace-meta { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+  .var-trace-pill {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    padding: 2px 7px;
+    border-radius: 20px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--muted);
+  }
+  .var-trace-count { font-size: 11.5px; color: var(--muted); margin-top: 6px; }
+  .var-trace-fullview-btn {
+    background: none; border: none; color: var(--teal); cursor: pointer;
+    font-size: 11.5px; text-decoration: underline; padding: 0;
+  }
+  .var-trace-close {
+    position: absolute; top: 8px; right: 8px;
+    background: none; border: none; color: var(--muted); cursor: pointer; font-size: 13px;
+  }
+  .var-trace-close:hover { color: var(--text); }
+  .var-trace-nav {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 6px;
+  }
+  .var-trace-nav-btn {
+    width: 22px; height: 22px;
+    border-radius: 5px;
+    border: 1px solid var(--border);
+    background: var(--panel);
+    color: var(--text);
+    cursor: pointer;
+    font-size: 13px;
+    line-height: 1;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .var-trace-nav-btn:hover { border-color: var(--teal); color: var(--teal); }
+  .var-trace-nav-btn:disabled { opacity: 0.35; cursor: default; }
+  .var-trace-nav-btn:disabled:hover { border-color: var(--border); color: var(--text); }
+  .var-trace-count-label {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--muted);
+    min-width: 44px;
+    text-align: center;
+  }
+  .var-trace-hidden-note {
+    font-size: 11px;
+    color: var(--muted-2);
+    margin-top: 6px;
+  }
+  .var-ref.current-trace {
+    outline: 2px solid var(--teal);
+    outline-offset: 1px;
+  }
+</style>
+
+<aside id="drawer">
+  <div class="drawer-head">
+    <div class="drawer-head-top">
+      <div>
+        <div class="drawer-filename" id="dFileName">—</div>
+        <div class="drawer-path" id="dPath">—</div>
+      </div>
+      <button class="drawer-close" id="drawerClose">✕</button>
+    </div>
+    <div class="badge-row" id="dBadges"></div>
+    <button class="btn tiny" id="dAskAiBtn" style="margin-top:10px;" title="Send just this file's export to an AI chat for a deep dive">🤖 Ask AI about this file</button>
+    <div class="drawer-head-actions">
+      <button class="btn tiny" id="fullViewToggle" title="Show every activity, including ones hidden by default (LogMessage, RetryScope, empty Else, etc.)">🔍 Full View</button>
+      <button class="btn tiny" id="varsToggle">🧮 Show Variables <span id="varsToggleCount"></span></button>
+    </div>
+  </div>
+  <div class="drawer-body">
+    <div class="section">
+      <div class="section-title">
+        Activity Flow
+      </div>
+      <div id="dVars" class="vars-panel"></div>
+      <div id="varTraceCard"></div>
+      <div id="dFlow"></div>
+    </div>
+    <div class="section">
+      <div class="section-title">Invokes <span class="count" id="dInvokesCount"></span></div>
+      <div class="link-list" id="dInvokes"></div>
+    </div>
+    <div class="section">
+      <div class="section-title">Invoked By <span class="count" id="dInvokedByCount"></span></div>
+      <div class="link-list" id="dInvokedBy"></div>
+    </div>
+  </div>
+</aside>
+
+<script>
+// --- File drawer module ---------------------------------------------------
+// Renders a selected file's activity flow (with inline notes, annotations, and
+// variable-reference tracing), variables list, and invoke/invoked-by links.
+
+function noteKey(nodeId) {
+  return (currentDrawerFile ? currentDrawerFile.relative_path : '') + '||' + nodeId;
+}
+
+function renderNoteSpan(nodeId) {
+  if (!nodeId) return '';
+  const key = noteKey(nodeId);
+  const existing = notesStore[key] || '';
+  const hasNote = existing.length > 0;
+  const cls = hasNote ? 'flow-note' : 'flow-note flow-note-empty';
+  return '<span class="' + cls + '" data-node-id="' + escapeHtml(nodeId) + '" contenteditable="false" data-placeholder="+ note">' + escapeHtml(existing) + '</span>';
+}
+
+// Renders the developer's own annotation/comment from the XAML (Studio's "Add Annotation"),
+// shown as a distinct read-only line - separate from .flow-note above, which is an editable
+// note the map's viewer adds themselves. Shown in both views: an annotation is exactly the
+// kind of "explains the logic" content the default view is meant to surface.
+function renderAnnotation(node) {
+  if (!node.annotation) return '';
+  return '<div class="flow-annotation"><span class="flow-annotation-icon">&#128172;</span><span>' + escapeHtml(node.annotation) + '</span></div>';
+}
+
+// Small inline SVG icons used to flag two step types worth calling out at a glance in the
+// activity list: activities that come from a custom/imported library package, and
+// Invoke Workflow File steps. Both are appended right after the step's name/title, so they
+// read as part of the label rather than a separate row.
+const ICON_LIBRARY = '<svg class="flow-type-icon" viewBox="0 0 16 16" width="12" height="12" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M8 1.5 14 4.5V11.5L8 14.5 2 11.5V4.5L8 1.5Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M2 4.5 8 7.5 14 4.5" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M8 7.5V14.5" stroke="currentColor" stroke-width="1.3"/></svg>';
+const ICON_INVOKE = '<svg class="flow-type-icon" viewBox="0 0 16 16" width="12" height="12" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M3 8H12.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M9.5 4.5 13 8L9.5 11.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 4V12" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-opacity="0.45"/></svg>';
+
+// A library-package activity can be a leaf or (rarely) a container, so this is appended
+// to a node's rendered name/title wherever that happens, rather than being tied to one
+// specific rendering branch (unlike the Invoke icon, which only ever appears on the
+// dedicated InvokeWorkflowFile row below).
+function renderLibraryIcon(node) {
+  if (!node.library_assembly) return '';
+  return '<span class="flow-type-icon-wrap" title="Imported library: ' + escapeHtml(node.library_assembly) + '">' + ICON_LIBRARY + '</span>';
+}
+
+let activeTraceDeclId = null;
+let activeTraceIndex = 0;
+
+function escapeRegex(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function wrapVarRefs(text, refs) {
+  if (!refs || !refs.length) return escapeHtml(text);
+  const names = refs.map(function (r) { return r.name; })
+    .sort(function (a, b) { return b.length - a.length; });
+  const byName = {};
+  refs.forEach(function (r) { byName[r.name] = r; });
+  const pattern = new RegExp('\\b(?:' + names.map(escapeRegex).join('|') + ')\\b', 'g');
+
+  let result = '';
+  let lastIndex = 0;
+  let m;
+  while ((m = pattern.exec(text)) !== null) {
+    result += escapeHtml(text.slice(lastIndex, m.index));
+    const ref = byName[m[0]];
+    result += '<span class="var-ref role-' + ref.role + '" data-decl-id="' + escapeHtml(ref.decl_id) + '">' + escapeHtml(m[0]) + '</span>';
+    lastIndex = pattern.lastIndex;
+  }
+  result += escapeHtml(text.slice(lastIndex));
+  return result;
+}
+
+// key_arguments now arrive pre-decided from scanner.py's FIELD_SPECS_BY_TAG: each entry
+// carries its own "compact" flag (shown in the default view or not) computed once in
+// Python from that tag's FieldSpec list, and only-if-present fields are already dropped
+// server-side when they have no value. So this function no longer needs any
+// tag-specific rule of its own (the old FULL_VIEW_ONLY_KEY_ARG_TAGS special-cased Throw
+// here in JS - that's now just Throw's FieldSpec(compact=False) in Python) - it just
+// reads the flag back.
+function renderArgRows(node, isContainer) {
+  let shown;
+  if (node.key_arguments) {
+    shown = showFullFlow ? node.key_arguments : node.key_arguments.filter(function (a) { return a.compact; });
+  } else if (!isContainer && node.arguments && node.arguments.length) {
+    // uncurated fallback - leaf activities only. Shown in both views now: default view
+    // keeps only arguments with a meaningful (non-empty) value, since that's the
+    // information that actually contributes to understanding the logic/variable flow.
+    // Full View shows every raw argument, including empty ones, for full detail.
+    shown = showFullFlow
+      ? node.arguments
+      : node.arguments.filter(function (a) { return a.value && String(a.value).trim().length > 0; });
+  } else {
+    shown = [];
+  }
+  if (!shown.length) return '';
+    return shown.map(function (a) {
+    const dirPill = a.direction
+      ? '<span class="dir-pill ' + directionMeta(a.direction).cls + '">' + escapeHtml(directionLabel(a.direction)) + '</span>'
+      : '';
+    return '<div class="flow-arg-row">'
+      + dirPill
+      + '<span class="flow-arg-name">' + escapeHtml(a.name) + '</span>'
+      + '<span class="flow-arg-eq">:</span>'
+      + '<span class="flow-arg-value" title="' + escapeHtml(a.value) + '">' + wrapVarRefs(a.value, a.value_refs) + '</span>'
+      + '</div>';
+  }).join('');
+}
+
+function renderFlowSteps(steps) {
+  if (!steps || steps.length === 0) {
+    return '<div class="flow-empty">No activities in this file (or the flow is based on a Flowchart that is not yet fully supported)</div>';
+  }
+  return '<div class="flow-list">' + steps.map(renderFlowNode).join('') + '</div>';
+}
+
+function renderFlowNode(node) {
+  if (node.type === 'branch') {
+    const isLoop = node.kind === 'while';
+    const isFlowchartDecision = node.kind === 'flow-if' || node.kind === 'flow-switch';
+    const genericKindLabel = isLoop ? 'Loop'
+      : (node.kind === 'switch' || node.kind === 'flow-switch') ? 'Switch'
+      : node.kind === 'trycatch' ? 'Try/Catch' : 'If';
+    // Real If/Switch/TryCatch activities have no meaningful DisplayName of their own
+    // (Studio always calls them just "If" etc.), so node.name is only set on decision
+    // nodes built from something else - e.g. NCheckState. A While/DoWhile/
+    // InterruptibleDoWhile is different: _process_while_node always sets node.name
+    // (elem.get("DisplayName") or the bare tag), since developers commonly rename loops
+    // (e.g. "Retry Until Success") - so for a loop, only fall back to the generic "Loop"
+    // label when DisplayName was actually empty and node.name is just the bare tag
+    // Studio/scanner.py defaults to (any tag registered with `loop` in ACTIVITY_SPECS -
+    // this list should track that registry's loop-tagged entries).
+    const BARE_LOOP_TAG_NAMES = new Set(['While', 'DoWhile', 'InterruptibleDoWhile']);
+    const isBareLoopTag = isLoop && BARE_LOOP_TAG_NAMES.has(node.name);
+    const kindLabel = (node.name && !isBareLoopTag) ? escapeHtml(node.name) : genericKindLabel;
+    const kindTitle = node.name ? ' title="' + escapeHtml(node.name) + '"' : '';
+    const sourceTag = isFlowchartDecision ? '<span class="flow-kind-source">Flowchart</span>' : '';
+        const headCond = node.condition
+      ? '<span class="flow-branch-cond" title="' + escapeHtml(node.condition) + '">' + wrapVarRefs(node.condition, node.condition_refs) + '</span>'
+      : '';
+    const headMarker = isLoop
+      ? '<span class="flow-branch-loop-icon" title="Loop">&#8635;</span>'
+      : '<span class="flow-branch-diamond"></span>';
+    const headClasses = 'flow-branch-head'
+      + (isFlowchartDecision ? ' flow-branch-head-flowchart' : '')
+      + (isLoop ? ' flow-branch-head-loop' : '');
+    // A loop's MaxIterations/Index (see FIELD_SPECS_BY_TAG's "While"/"DoWhile" entries)
+    // render as ordinary argument rows right under the header, the same treatment a
+    // container activity's key_arguments get (renderArgRows(node, true)) - they're loop
+    // parameters, not part of the condition, so they don't belong in the header itself.
+    const argsHtml = isLoop ? renderArgRows(node, true) : '';
+    let html = '<div class="flow-branch' + (isLoop ? ' loop' : ' decision') + '" data-node-id="' + escapeHtml(node.id) + '">';
+    html += '<div class="' + headClasses + '"><button class="flow-collapse-toggle" title="Collapse/expand">&#9662;</button>' + headMarker + '<span class="flow-branch-kind"' + kindTitle + '>' + kindLabel + '</span>' + sourceTag + headCond + renderNoteSpan(node.id) + '</div>';
+    html += renderAnnotation(node);
+    if (argsHtml) html += '<div class="flow-branch-args">' + argsHtml + '</div>';
+    html += '<div class="flow-branch-body">';
+    node.branches.forEach(function (b) {
+            const label = b.condition
+        ? '<span class="flow-alt-label-text">' + escapeHtml(b.label) + '</span><span class="flow-branch-cond" title="' + escapeHtml(b.condition) + '">' + wrapVarRefs(b.condition, b.condition_refs) + '</span>'
+        : '<span class="flow-alt-label-text">' + escapeHtml(b.label) + '</span>';
+              html += '<div class="flow-alt"><div class="flow-alt-label">' + label + '</div>' + renderAnnotation(b) + renderFlowSteps(b.steps) + '</div>';
+    });
+    html += '</div></div>';
+    return html;
+  }
+
+    if ((node.tag === 'Assign' || node.tag === 'MultipleAssign') && node.assignments && node.assignments.length) {
+    const rows = node.assignments.map(function (a) {
+      return '<div class="flow-assign-row">'
+        + '<span class="flow-assign-to" title="' + escapeHtml(a.to) + '">' + wrapVarRefs(a.to, a.to_refs) + '</span>'
+        + '<span class="flow-assign-eq">=</span>'
+        + '<span class="flow-assign-value" title="' + escapeHtml(a.value) + '">' + wrapVarRefs(a.value, a.value_refs) + '</span>'
+        + '</div>';
+    }).join('');
+    return '<div class="flow-step flow-assign" data-node-id="' + escapeHtml(node.id) + '">'
+      + '<div class="flow-assign-title" title="' + escapeHtml(node.name) + '">' + escapeHtml(node.name) + renderNoteSpan(node.id) + '</div>'
+      + renderAnnotation(node)
+      + rows
+      + '</div>';
+  }
+
+  if (node.tag === 'InvokeWorkflowFile') {
+    const displayName = escapeHtml(node.name);
+    if (node.target_relative_path) {
+      return '<div class="flow-step flow-invoke" data-node-id="' + escapeHtml(node.id) + '" data-target="' + escapeHtml(node.target_relative_path) + '" title="' + escapeHtml(node.name) + ' -> ' + escapeHtml(node.target_relative_path) + '">' + ICON_INVOKE + ' Invoke: ' + displayName + renderNoteSpan(node.id) + renderAnnotation(node) + '</div>';
+    }
+    if (node.is_dynamic) {
+      return '<div class="flow-step flow-invoke-warn" data-node-id="' + escapeHtml(node.id) + '" title="' + escapeHtml(node.name) + ' (dynamic: ' + escapeHtml(node.raw_path || '') + ')">' + ICON_INVOKE + ' Warning: ' + displayName + ' (dynamic)' + renderNoteSpan(node.id) + renderAnnotation(node) + '</div>';
+    }
+    return '<div class="flow-step flow-invoke-warn" data-node-id="' + escapeHtml(node.id) + '" title="' + escapeHtml(node.name) + ' (unresolved: ' + escapeHtml(node.raw_path || '') + ')">' + ICON_INVOKE + ' Warning: ' + displayName + ' (unresolved)' + renderNoteSpan(node.id) + renderAnnotation(node) + '</div>';
+  }
+
+    const children = node.children || [];
+  if (children.length > 0) {
+    if (node.tag === 'Sequence') {
+      if (!showFullFlow) {
+        // Default view: the Sequence container itself stays invisible, but its annotation
+        // (if any) is exactly the "explains the logic" content that belongs in this view -
+        // so it's surfaced as a standalone line even though the container it was written on
+        // doesn't get its own row here.
+        return renderAnnotation(node) + renderFlowSteps(children);
+      }
+      // Full View: show Sequence as a visible named container, like any other
+      // container activity, instead of disappearing into its children.
+      let seqHtml = '<div class="flow-branch" data-node-id="' + escapeHtml(node.id) + '">';
+      seqHtml += '<div class="flow-branch-head"><button class="flow-collapse-toggle" title="Collapse/expand">&#9662;</button><span class="flow-branch-kind" title="' + escapeHtml(node.name) + '">' + escapeHtml(node.name) + '</span>' + renderNoteSpan(node.id) + '</div>';
+      seqHtml += renderAnnotation(node);
+      seqHtml += '<div class="flow-branch-body">' + renderFlowSteps(children) + '</div>';
+      seqHtml += '</div>';
+      return seqHtml;
+    }
+    const scopeNote = node.scope_variable
+      ? ' <span class="flow-branch-cond">(' + escapeHtml(node.scope_variable) + ')</span>'
+      : '';
+      const argsHtml = renderArgRows(node, true); // container branch - true
+    let html = '<div class="flow-branch" data-node-id="' + escapeHtml(node.id) + '">';
+    html += '<div class="flow-branch-head">' + renderLibraryIcon(node) + '<button class="flow-collapse-toggle" title="Collapse/expand">&#9662;</button><span class="flow-branch-kind" title="' + escapeHtml(node.name) + '">' + escapeHtml(node.name) + '</span>' + scopeNote + renderNoteSpan(node.id) + '</div>';
+    html += renderAnnotation(node);
+    if (argsHtml) html += '<div class="flow-branch-args">' + argsHtml + '</div>';
+    html += '<div class="flow-branch-body">' + renderFlowSteps(children) + '</div>';
+    html += '</div>';
+    return html;
+  }
+
+  const leafArgsHtml = renderArgRows(node, false); // leaf branch - false
+  if (leafArgsHtml) {
+    return '<div class="flow-step flow-step-detailed" data-node-id="' + escapeHtml(node.id) + '">'
+      + '<div class="flow-step-title" title="' + escapeHtml(node.name) + '">' + renderLibraryIcon(node) + escapeHtml(node.name) + renderNoteSpan(node.id) + '</div>'
+      + renderAnnotation(node)
+      + leafArgsHtml
+      + '</div>';
+  }
+  return '<div class="flow-step" data-node-id="' + escapeHtml(node.id) + '" title="' + escapeHtml(node.name) + '">' + renderLibraryIcon(node) + escapeHtml(node.name) + renderNoteSpan(node.id) + renderAnnotation(node) + '</div>';
+}
+
+function renderFlowInto(container, steps) {
+  container.innerHTML = renderFlowSteps(steps);
+  wireNoteEditing(container);
+  applyNoteEditability();
+  wireVarRefs(container);
+  if (activeTraceDeclId) {
+    setActiveTrace(activeTraceDeclId, activeTraceIndex);
+  }
+}
+
+function wireNoteEditing(container) {
+  container.querySelectorAll('.flow-note').forEach(function (el) {
+    el.addEventListener('mousedown', function (e) { e.stopPropagation(); });
+    el.addEventListener('click', function (e) { e.stopPropagation(); });
+    el.addEventListener('input', function () {
+      const nodeId = el.getAttribute('data-node-id');
+      notesStore[noteKey(nodeId)] = el.textContent;
+      el.classList.toggle('flow-note-empty', el.textContent.trim().length === 0);
+    });
+    el.addEventListener('blur', function () {
+      const nodeId = el.getAttribute('data-node-id');
+      const key = noteKey(nodeId);
+      const trimmed = (notesStore[key] || '').trim();
+      if (trimmed) {
+        notesStore[key] = trimmed;
+      } else {
+        delete notesStore[key];
+        el.textContent = '';
+      }
+      el.classList.toggle('flow-note-empty', !trimmed);
+    });
+  });
+}
+
+function wireVarRefs(container) {
+  container.querySelectorAll('.var-ref').forEach(function (el) {
+    el.addEventListener('click', function (e) {
+      e.stopPropagation();
+      const declId = el.getAttribute('data-decl-id');
+      if (declId === activeTraceDeclId) {
+        setActiveTrace(null);
+        return;
+      }
+      const elements = document.querySelectorAll('.var-ref[data-decl-id="' + declId + '"]');
+      const clickedIndex = Array.prototype.indexOf.call(elements, el);
+      setActiveTrace(declId, clickedIndex >= 0 ? clickedIndex : 0);
+    });
+  });
+}
+
+// Mirrors renderFlowNode's actual display logic exactly, so the count always matches what
+// wrapVarRefs really wraps into .var-ref spans - not just every ref that technically exists
+// in the data. Cases where the raw data has more refs than are ever shown:
+//   - Assign/MultipleAssign nodes: only `assignments` (to_refs/value_refs) are rendered;
+//     any `arguments`/`key_arguments` on the same node are never reached (renderFlowNode
+//     returns early for Assign before renderArgRows is called).
+//   - InvokeWorkflowFile nodes: never rendered through wrapVarRefs at all.
+//   - Container nodes (have children, not Sequence): renderArgRows(node, true) only shows
+//     key_arguments - the raw `arguments` fallback is leaf-only.
+//   - Leaf nodes' raw `arguments` (no key_arguments): shown in both views, but the default
+//     view only shows entries with a non-empty value - matches renderArgRows(node, false).
+//   - Leaf nodes' key_arguments: each entry's own "compact" flag (from scanner.py's
+//     FIELD_SPECS_BY_TAG) decides whether it counts in the default view - e.g. Throw's
+//     Exception (compact=False) only counts in Full View - matches renderArgRows.
+// isFullView must match whatever renderFlowInto is about to render, so a leaf's raw
+// `arguments` filtering lines up with what's actually on screen.
+function countDeclOccurrences(steps, declId, isFullView) {
+  if (!steps) return 0;
+  let count = 0;
+  steps.forEach(function (node) {
+    if (node.type === 'branch') {
+      (node.condition_refs || []).forEach(function (r) { if (r.decl_id === declId) count++; });
+      // While/DoWhile ("kind": "while") carry their own key_arguments (MaxIterations,
+      // Index) directly on the branch node, unlike If/Switch - mirrors renderArgRows(node, true)
+      // for a branch, which is the same call renderFlowNode makes for these nodes' Body branch.
+      (node.key_arguments || []).forEach(function (a) {
+        if (isFullView || a.compact) {
+          (a.value_refs || []).forEach(function (r) { if (r.decl_id === declId) count++; });
+        }
+      });
+      node.branches.forEach(function (b) {
+        (b.condition_refs || []).forEach(function (r) { if (r.decl_id === declId) count++; });
+        count += countDeclOccurrences(b.steps, declId, isFullView);
+      });
+      return;
+    }
+
+    if ((node.tag === 'Assign' || node.tag === 'MultipleAssign') && node.assignments && node.assignments.length) {
+      node.assignments.forEach(function (a) {
+        (a.to_refs || []).forEach(function (r) { if (r.decl_id === declId) count++; });
+        (a.value_refs || []).forEach(function (r) { if (r.decl_id === declId) count++; });
+      });
+      return; // matches renderFlowNode: no arg rows are ever shown for Assign
+    }
+
+    if (node.tag === 'InvokeWorkflowFile') {
+      return; // matches renderFlowNode: no wrapVarRefs call for invokes
+    }
+
+    const children = node.children || [];
+    if (children.length > 0) {
+      if (node.tag !== 'Sequence') {
+        (node.key_arguments || []).forEach(function (a) {
+          (a.value_refs || []).forEach(function (r) { if (r.decl_id === declId) count++; });
+        });
+        // container branch: raw `arguments` is never shown, matches renderArgRows(node, true)
+      }
+      count += countDeclOccurrences(children, declId, isFullView);
+      return;
+    }
+
+    // leaf: matches renderArgRows(node, false)
+    let shown;
+    if (node.key_arguments && node.key_arguments.length) {
+      shown = isFullView ? node.key_arguments : node.key_arguments.filter(function (a) { return a.compact; });
+    } else if (node.arguments && node.arguments.length) {
+      shown = isFullView
+        ? node.arguments
+        : node.arguments.filter(function (a) { return a.value && String(a.value).trim().length > 0; });
+    } else {
+      shown = [];
+    }
+    shown.forEach(function (a) {
+      (a.value_refs || []).forEach(function (r) { if (r.decl_id === declId) count++; });
+    });
+  });
+  return count;
+}
+
+function setActiveTrace(declId, initialIndex) {
+  activeTraceDeclId = declId;
+  activeTraceIndex = initialIndex || 0;
+  document.body.classList.toggle('tracing-var', !!declId);
+  document.querySelectorAll('.var-ref').forEach(function (el) {
+    const isMatch = !!declId && el.getAttribute('data-decl-id') === declId;
+    el.classList.toggle('active-trace', isMatch);
+    el.classList.remove('current-trace');
+  });
+
+  const card = document.getElementById('varTraceCard');
+  if (!declId || !currentDrawerFile) {
+    card.style.display = 'none';
+    card.innerHTML = ''; // drop stale content (e.g. from a previously viewed file's trace)
+    return;
+  }
+  const decl = (currentDrawerFile.variable_declarations || {})[declId];
+  if (!decl) {
+    card.style.display = 'none';
+    card.innerHTML = '';
+    return;
+  }
+
+  // Two independent counts, always computed from their own fixed source regardless of which
+  // view is currently active - this is what lets the default view warn about occurrences
+  // that only exist in Full View, instead of just matching whatever's on screen right now:
+  //   - visibleCount: what's actually rendered in the DOM right now (matches the active view).
+  //   - fullCount: how many occurrences exist in Full View, always - the ceiling this
+  //     variable can ever reach, used to detect "there's more elsewhere" even while looking
+  //     at the filtered default view.
+  // In Full View these two are always equal (nothing is filtered), so no note is needed there.
+  const visibleCount = document.querySelectorAll('.var-ref[data-decl-id="' + declId + '"]').length;
+  const fullCount = countDeclOccurrences(currentDrawerFile.activity_flow || [], declId, true);
+
+  let html = '<button class="var-trace-close" id="varTraceClose">&times;</button>';
+  html += '<div class="var-trace-name">' + escapeHtml(decl.name) + '</div>';
+  html += '<div class="var-trace-meta">';
+  if (decl.type) html += '<span class="var-trace-pill">' + escapeHtml(decl.type) + '</span>';
+  html += '<span class="var-trace-pill">' + escapeHtml(decl.scope) + '</span>';
+  if (decl.direction) html += '<span class="var-trace-pill">' + escapeHtml(decl.direction) + '</span>';
+  html += '</div>';
+
+  if (visibleCount > 0) {
+    html += '<div class="var-trace-nav">';
+    html += '<button class="var-trace-nav-btn" id="varTracePrev" title="Previous occurrence"' + (visibleCount <= 1 ? ' disabled' : '') + '>&lsaquo;</button>';
+    html += '<span class="var-trace-count-label" id="varTraceCountLabel"></span>';
+    html += '<button class="var-trace-nav-btn" id="varTraceNext" title="Next occurrence"' + (visibleCount <= 1 ? ' disabled' : '') + '>&rsaquo;</button>';
+    html += '</div>';
+  } else {
+    html += '<div class="var-trace-count">0 occurrences visible here</div>';
+  }
+
+  if (fullCount > visibleCount) {
+    html += '<div class="var-trace-hidden-note">' + (fullCount - visibleCount) + ' more not shown in this view - <button class="var-trace-fullview-btn" id="varTraceFullViewBtn">show all</button></div>';
+  }
+
+  card.innerHTML = html;
+  card.style.display = 'block';
+
+  document.getElementById('varTraceClose').addEventListener('click', function () { setActiveTrace(null); });
+  const fvBtn = document.getElementById('varTraceFullViewBtn');
+  if (fvBtn) {
+    fvBtn.addEventListener('click', function (e) {
+      // fullViewToggle.click() below dispatches its own, separate native click event whose
+      // target is the toggle button - not a descendant of #varTraceCard. The global
+      // outside-click closer (registered on document, capture phase) treats that as a click
+      // outside the card and closes the trace before fullViewToggle's own handler gets a
+      // chance to restore it via renderFlowInto, racing it closed. Stopping propagation here
+      // only prevents this click (on fvBtn itself) from reaching that listener - it does not
+      // and cannot stop the second, independent event that .click() is about to fire, so the
+      // trace is explicitly restored after switching views instead of relying on that race.
+      e.stopPropagation();
+      const declId = activeTraceDeclId;
+      const idx = activeTraceIndex;
+      if (!showFullFlow) fullViewToggle.click();
+      setActiveTrace(declId, idx);
+    });
+  }
+  const prevBtn = document.getElementById('varTracePrev');
+  const nextBtn = document.getElementById('varTraceNext');
+  if (prevBtn) prevBtn.addEventListener('click', function () { updateTraceCurrent(activeTraceIndex - 1, true); });
+  if (nextBtn) nextBtn.addEventListener('click', function () { updateTraceCurrent(activeTraceIndex + 1, true); });
+
+  updateTraceCurrent(activeTraceIndex, false);
+}
+
+// Closes the floating variable-trace card on any click elsewhere on the page - inside the
+// drawer's body, the graph canvas, the header, etc. Uses capture phase so it still sees the
+// click even where other handlers stop propagation. Two kinds of clicks must NOT close it:
+// clicking a .var-ref (that has its own open/close/switch logic in wireVarRefs) and clicking
+// inside the card itself (its close button, prev/next nav, "show all"), since those already
+// manage the trace state directly.
+document.addEventListener('click', function (e) {
+  if (!activeTraceDeclId) return;
+  if (e.target.closest('.var-ref')) return;
+  if (e.target.closest('#varTraceCard')) return;
+  setActiveTrace(null);
+}, true);
+
+// Collapse/expand for .flow-branch blocks (If/Switch/Try-Catch/While decisions, and
+// container activities/Sequences in Full View). Delegated on the drawer body
+// rather than wired per-node in renderFlowInto, so it keeps working across
+// every re-render (view toggle, file switch, note edits) without needing to be
+// re-attached each time. Toggling only the clicked branch's own "collapsed"
+// class - not its descendants - means collapsing a branch preserves whatever
+// collapsed/expanded state its inner branches already had, so re-expanding it
+// later shows them exactly as they were left.
+document.getElementById('dFlow').addEventListener('click', function (e) {
+  const toggle = e.target.closest('.flow-collapse-toggle');
+  if (!toggle) return;
+  e.stopPropagation();
+  const branch = toggle.closest('.flow-branch');
+  if (branch) branch.classList.toggle('collapsed');
+});
+
+function updateTraceCurrent(newIndex, shouldScroll) {
+  if (!activeTraceDeclId) return;
+  const elements = document.querySelectorAll('.var-ref[data-decl-id="' + activeTraceDeclId + '"]');
+  if (!elements.length) return;
+  const normalized = ((newIndex % elements.length) + elements.length) % elements.length;
+  elements.forEach(function (el) { el.classList.remove('current-trace'); });
+  const current = elements[normalized];
+  current.classList.add('current-trace');
+  if (shouldScroll) {
+    current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+  activeTraceIndex = normalized;
+  const label = document.getElementById('varTraceCountLabel');
+  if (label) label.textContent = (normalized + 1) + ' / ' + elements.length;
+}
+
+function applyNoteEditability() {
+  document.querySelectorAll('.flow-note').forEach(function (el) {
+    el.setAttribute('contenteditable', editMode ? 'true' : 'false');
+  });
+}
+
+const drawer = document.getElementById('drawer');
+const drawerBody = document.querySelector('.drawer-body');
+const varsToggle = document.getElementById('varsToggle');
+const varsPanel = document.getElementById('dVars');
+const fullViewToggle = document.getElementById('fullViewToggle');
+
+// Finds whichever rendered activity node currently sits at the top edge of the
+// scrolled drawer body, so that toggling Full View can re-render around that same
+// activity instead of snapping back to the top of the list. Reads the DOM at a single
+// point just inside the scroll container's top edge (rather than looping over every
+// [data-node-id] element and comparing rects) so it naturally resolves to the most
+// specific node under that point - a leaf step if one is there, or the nearest
+// containing branch/decision if the point falls on a container's own header/padding.
+function getScrollAnchorNodeId() {
+  const rect = drawerBody.getBoundingClientRect();
+  const el = document.elementFromPoint(rect.left + 20, rect.top + 8);
+  if (!el) return null;
+  const anchor = el.closest('[data-node-id]');
+  return anchor ? anchor.getAttribute('data-node-id') : null;
+}
+
+// Counterpart to getScrollAnchorNodeId: after a re-render, jumps the drawer body so the
+// same activity (by node id) sits at the top again, instead of leaving the scroll
+// position wherever it happened to land (typically the top of the whole list, since
+// the flow container was just rebuilt from scratch).
+function restoreScrollAnchor(nodeId) {
+  if (!nodeId) return;
+  const target = document.querySelector('#dFlow [data-node-id="' + CSS.escape(nodeId) + '"]');
+  if (target) target.scrollIntoView({ block: 'start' });
+}
+
+document.getElementById('drawerClose').addEventListener('click', closeDrawer);
+
+// Opens the shared AI panel (ai_panel.html fragment) scoped to whichever file is
+// currently shown in the drawer, rather than the whole-project export. Wired once
+// here (not inside openDrawer) since it only ever needs currentDrawerFile at the
+// moment of the click, not at the moment the drawer was opened. window.openAiModal
+// may not exist if ai_panel.html wasn't injected into this report (e.g. an older
+// report.py run, or the feature intentionally left out) - guarded rather than
+// assumed, same defensive pattern as the "no export data" fallback inside that
+// panel itself.
+const dAskAiBtn = document.getElementById('dAskAiBtn');
+if (dAskAiBtn) {
+  dAskAiBtn.addEventListener('click', function () {
+    if (!currentDrawerFile) return;
+    if (typeof window.openAiModal === 'function') {
+      window.openAiModal('file', currentDrawerFile.relative_path);
+    }
+  });
+}
+
+varsToggle.addEventListener('click', function () {
+  varsPanel.classList.toggle('open');
+  const opened = varsPanel.classList.contains('open');
+  varsToggle.classList.toggle('toggle-on', opened);
+  // The vars panel renders at the top of the (scrollable) drawer body, right under the
+  // "Activity Flow" heading. If the user had the activity flow scrolled down, opening the
+  // panel there would be invisible until they scrolled back up themselves - so jump the
+  // drawer body to the top whenever the panel opens. Not done on close: there's nothing
+  // new to reveal then, and it would just yank the user's place in the flow list away.
+  if (opened) drawerBody.scrollTop = 0;
+});
+
+fullViewToggle.addEventListener('click', function () {
+  // Capture which activity is currently at the top of the visible drawer body before the
+  // flow list gets rebuilt, so the same activity can be scrolled back to the top afterward
+  // instead of the view snapping back to the very start of the list.
+  const anchorNodeId = getScrollAnchorNodeId();
+  showFullFlow = !showFullFlow;
+  fullViewToggle.classList.toggle('toggle-on', showFullFlow);
+  fullViewToggle.textContent = showFullFlow ? 'Full View (on)' : 'Full View';
+  if (currentDrawerFile) {
+    renderFlowInto(
+      document.getElementById('dFlow'),
+      showFullFlow ? (currentDrawerFile.activity_flow || []) : (currentDrawerFile.activity_flow_display || currentDrawerFile.activity_flow || [])
+    );
+    // If the anchor activity doesn't exist in the new view (e.g. it was a LogMessage that
+    // Full View shows but the default view filters out), it simply won't be found and the
+    // scroll position is left wherever the fresh render put it - there's no meaningful
+    // "closest" fallback since the whole list has been rebuilt.
+    restoreScrollAnchor(anchorNodeId);
+  }
+});
+
+function closeDrawer() {
+  drawer.classList.remove('open');
+  if (network) network.unselectAll();
+  currentDrawerFile = null;
+}
+
+function openDrawer(nodeId, byPath) {
+  const f = byPath[nodeId];
+  if (!f) return;
+
+  currentDrawerFile = f;
+  showFullFlow = false;
+  // Fully closes any variable trace left open from the previously viewed file - not just
+  // clearing the tracking variable, but also hiding #varTraceCard and clearing its content,
+  // since that card belongs to whichever file's flow is on screen and is meaningless (or
+  // pointing at stale data) once we switch files.
+  setActiveTrace(null);
+  fullViewToggle.classList.remove('toggle-on');
+  fullViewToggle.textContent = 'Full View';
+
+  document.getElementById('dFileName').textContent = f.file_name;
+  document.getElementById('dPath').textContent = f.relative_path;
+
+  const isEntry = f.parse_ok && (f.invoked_by || []).length === 0;
+  let badges = '';
+  if (isEntry) badges += '<span class="badge entry">Entry Point</span>';
+  if (!f.parse_ok) badges += '<span class="badge error">Parse Error</span>';
+  // Variable count used to have its own badge here, but it's redundant with the
+  // count already shown on the "Show Variables" toggle itself, so it was dropped.
+  document.getElementById('dBadges').innerHTML = badges;
+
+  // No single-file AI export exists for a file that failed to parse (see
+  // ai_export.py's build_all_file_exports, which skips them) - disable up front
+  // rather than let the click open the panel just to show an empty-state message.
+  const askAiBtnEl = document.getElementById('dAskAiBtn');
+  if (askAiBtnEl) askAiBtnEl.disabled = !f.parse_ok;
+
+  const vars = f.variables || [];
+  varsPanel.classList.remove('open');
+  varsToggle.classList.remove('toggle-on');
+  document.getElementById('varsToggleCount').textContent = '(' + vars.length + ')';
+  varsPanel.innerHTML = vars.length ? vars.map(function (v) {
+    return '<div class="var-item"><span class="item-name">' + escapeHtml(v.name) + '</span><span class="item-type">' + escapeHtml(v.type) + '</span><span class="var-scope">' + escapeHtml(v.scope) + '</span></div>';
+  }).join('') : '<div class="empty-hint">No variables in this file</div>';
+
+  renderFlowInto(document.getElementById('dFlow'), f.activity_flow_display || f.activity_flow || []);
+
+  const invokes = f.invokes || [];
+  document.getElementById('dInvokesCount').textContent = '(' + invokes.length + ')';
+  document.getElementById('dInvokes').innerHTML = invokes.length ? invokes.map(function (inv) {
+    if (inv.target_relative_path) {
+      return '<div class="link-item" data-target="' + inv.target_relative_path + '">' + inv.target_relative_path + '</div>';
+    }
+    return '<div class="link-item dynamic">' + (inv.is_dynamic ? 'Dynamic invocation: ' + inv.raw_path : 'Unresolved: ' + inv.raw_path) + '</div>';
+  }).join('') : '<div class="empty-hint">Does not invoke other files</div>';
+
+  const invokedBy = f.invoked_by || [];
+  document.getElementById('dInvokedByCount').textContent = '(' + invokedBy.length + ')';
+  document.getElementById('dInvokedBy').innerHTML = invokedBy.length ? invokedBy.map(function (p) {
+    return '<div class="link-item" data-target="' + p + '">' + p + '</div>';
+  }).join('') : '<div class="empty-hint">No file invokes this</div>';
+
+  document.querySelectorAll('.link-item[data-target], .flow-invoke[data-target]').forEach(function (el) {
+    el.addEventListener('click', function () {
+      const target = el.getAttribute('data-target');
+      // Keep the map's expand/collapse state (activePath) in sync with what
+      // the drawer is about to show - see revealNode's comment in
+      // project_map.html for why this can't just be selectNodes/focus, and
+      // why the drawer's own currentDrawerFile (not activePath) is the
+      // reliable "parent" to anchor the newly revealed node to.
+      if (typeof revealNode === 'function') {
+        revealNode(target, currentDrawerFile ? currentDrawerFile.relative_path : null);
+      }
+      network.selectNodes([target]);
+      network.focus(target, { scale: 1, animation: true });
+      openDrawer(target, byPath);
+    });
+  });
+
+  drawer.classList.add('open');
+}
+</script>

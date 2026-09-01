@@ -1,0 +1,218 @@
+<style>
+  /* --- Edge tooltip: styled argument list shown when hovering an invocation arrow --- */
+  .edge-tooltip {
+    display: flex;
+    flex-direction: column;
+    width: 300px;
+    max-width: 300px;
+    position: relative;
+  }
+  .edge-tooltip-title {
+    font-family: var(--sans);
+    font-size: 10.5px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--muted);
+    padding: 9px 12px 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  .edge-tooltip-rows {
+    display: flex;
+    flex-direction: column;
+    max-height: 260px;
+    overflow-y: auto;
+  }
+  .edge-tooltip-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 12px;
+    border-bottom: 1px solid #1D242E;
+  }
+  .edge-tooltip-row:last-child { border-bottom: none; }
+  .edge-tooltip-arg {
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text);
+    max-width: 96px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .edge-tooltip-arrow {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--muted-2);
+    flex-shrink: 0;
+  }
+  .edge-tooltip-expr {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+    min-width: 0;
+  }
+  .edge-tooltip-empty {
+    font-family: var(--sans);
+    font-size: 12px;
+    font-style: italic;
+    color: var(--muted-2);
+    padding: 10px 12px;
+  }
+  .edge-tooltip .dir-pill {
+    min-width: 40px;
+  }
+  .edge-tooltip-box {
+    position: fixed;
+    display: none;
+    z-index: 30;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    box-shadow: 0 10px 28px rgba(0,0,0,0.45);
+    pointer-events: none; /* preview mode: doesn't intercept the mouse */
+  }
+  .edge-tooltip-box.pinned {
+    pointer-events: auto; /* pinned: mouse can enter it and hover the rows */
+  }
+  .edge-tooltip-close {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    width: 20px;
+    height: 20px;
+    border: none;
+    background: transparent;
+    color: var(--muted);
+    font-size: 13px;
+    cursor: pointer;
+    border-radius: 5px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .edge-tooltip-close:hover { background: var(--panel-2); color: var(--text); }
+</style>
+
+<div id="edgeTooltipBox" class="edge-tooltip-box"></div>
+
+<script>
+// --- Edge tooltip module -----------------------------------------------------
+// Shows the list of argument bindings passed along an invocation edge, either
+// as a transient preview on hover or pinned open on click.
+//
+// Depends on globals declared in the main script block: `edgesDataSet`,
+// `pinnedEdgeId`, `lastMouseX`, `lastMouseY`, and `escapeHtml`.
+
+function directionLabel(dir) {
+  return dir === 'In' ? 'In' : dir === 'Out' ? 'Out' : dir === 'In/Out' ? 'In/Out' : (dir || '?');
+}
+
+function directionMeta(dir) {
+  if (dir === 'In') return { cls: 'dir-in', arrow: '\u2192' };
+  if (dir === 'Out') return { cls: 'dir-out', arrow: '\u2190' };
+  if (dir === 'In/Out') return { cls: 'dir-inout', arrow: '\u21c4' };
+  return { cls: 'dir-prop', arrow: '\u2014' };
+}
+
+function buildEdgeTooltip(bindings, pinned) {
+  const wrap = document.createElement('div');
+  wrap.className = 'edge-tooltip';
+
+  if (pinned) {
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'edge-tooltip-close';
+    closeBtn.textContent = 'x';
+    closeBtn.setAttribute('aria-label', 'Close');
+    closeBtn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      pinnedEdgeId = null;
+      hideEdgeTooltip();
+    });
+    wrap.appendChild(closeBtn);
+  }
+
+  if (!bindings || bindings.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'edge-tooltip-empty';
+    empty.textContent = 'This invocation passes no arguments';
+    wrap.appendChild(empty);
+    return wrap;
+  }
+
+  const title = document.createElement('div');
+  title.className = 'edge-tooltip-title';
+  title.textContent = 'Arguments (' + bindings.length + ')';
+  wrap.appendChild(title);
+
+  const rows = document.createElement('div');
+  rows.className = 'edge-tooltip-rows';
+
+  bindings.forEach(function (b) {
+    const meta = directionMeta(b.direction);
+    const row = document.createElement('div');
+    row.className = 'edge-tooltip-row';
+
+    const pill = document.createElement('span');
+    pill.className = 'dir-pill ' + meta.cls;
+    pill.textContent = directionLabel(b.direction);
+
+    const arg = document.createElement('span');
+    arg.className = 'edge-tooltip-arg';
+    arg.textContent = b.argument_name || '?';
+    arg.title = b.argument_name || '?';
+
+    const arrow = document.createElement('span');
+    arrow.className = 'edge-tooltip-arrow';
+    arrow.textContent = meta.arrow;
+
+    const expr = document.createElement('span');
+    expr.className = 'edge-tooltip-expr';
+    expr.textContent = b.expression || '-';
+    expr.title = b.expression || '-';
+
+    row.appendChild(pill);
+    row.appendChild(arg);
+    row.appendChild(arrow);
+    row.appendChild(expr);
+    rows.appendChild(row);
+  });
+
+  wrap.appendChild(rows);
+  return wrap;
+}
+
+function showEdgeTooltip(edgeId, pinned) {
+  const edge = edgesDataSet.get(edgeId);
+  if (!edge) return;
+  const box = document.getElementById('edgeTooltipBox');
+  box.innerHTML = '';
+  box.appendChild(buildEdgeTooltip(edge.argBindings || [], pinned));
+  box.classList.toggle('pinned', pinned);
+  box.style.display = 'block';
+  positionEdgeTooltip(box);
+}
+
+function positionEdgeTooltip(box) {
+  const margin = 14;
+  let left = lastMouseX + margin;
+  let top = lastMouseY + margin;
+  const rect = box.getBoundingClientRect();
+  if (left + rect.width > window.innerWidth - 8) left = lastMouseX - rect.width - margin;
+  if (top + rect.height > window.innerHeight - 8) top = lastMouseY - rect.height - margin;
+  box.style.left = Math.max(8, left) + 'px';
+  box.style.top = Math.max(8, top) + 'px';
+}
+
+function hideEdgeTooltip() {
+  const box = document.getElementById('edgeTooltipBox');
+  box.style.display = 'none';
+  box.classList.remove('pinned');
+}
+</script>

@@ -1,0 +1,1161 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>UiPath Project Map</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script id="vis-network-lib">__VIS_NETWORK_JS_PLACEHOLDER__</script>
+<style>
+  :root {
+    --bg: #0E1318;
+    --panel: #161D25;
+    --panel-2: #1D2530;
+    --border: #262F3B;
+    --text: #E7ECF2;
+    --muted: #8792A0;
+    --muted-2: #5C6673;
+    --teal: #4FD1C5;
+    --teal-dim: #2C6A64;
+    --amber: #F0A857;
+    --violet: #B98FE8;
+    --violet-dim: #4A3566;
+    --danger: #E2685C;
+    --danger-dim: #4A2C29;
+    --radius: 10px;
+    --mono: 'IBM Plex Mono', monospace;
+    --sans: 'IBM Plex Sans', sans-serif;
+
+    --btn-primary-hover: #63DBD0;
+    --btn-hover-bg: #232C38;
+    --node-text: #E7ECF2;
+    --node-bg-error: #4A2C29;
+    --node-bg-entry: #2A2115;
+    --node-bg-regular: #1D2530;
+    --node-border-regular: #3A4453;
+    --node-highlight-bg: #232C38;
+    --edge-color: #3A4453;
+    --edge-label-color: #8792A0;
+    --edge-label-bg: #0E1318;
+    --dir-inout-bg: #2E2140;
+    --dir-inout-color: #B98FE8;
+    --dir-in-bg: #1E3A36;
+    --dir-out-bg: #3A2F1E;
+    --dir-prop-bg: #22293380;
+
+    --scope-head-bg: #2A2115;
+    --scope-head-flowchart-bg: #241C30;
+    --invoke-hover-bg: #1A2530;
+    --trace-active-color: #fff;
+    --amber-dim: #6B4A24;
+  }
+
+  html.light-mode {
+    --bg: #F5F7FA;
+    --panel: #FFFFFF;
+    --panel-2: #EDF0F4;
+    --border: #D8DEE6;
+    --text: #1B222C;
+    --muted: #5C6673;
+    --muted-2: #8792A0;
+    --teal: #1D9C90;
+    --teal-dim: #BCE9E3;
+    --amber: #B5720E;
+    --violet: #7A4FB0;
+    --violet-dim: #E5DAF5;
+    --danger: #C23B2E;
+    --danger-dim: #F6D9D5;
+
+    --btn-primary-hover: #17877D;
+    --btn-hover-bg: #E3E8EF;
+    --node-text: #1B222C;
+    --node-bg-error: #F6D9D5;
+    --node-bg-entry: #FBEBD3;
+    --node-bg-regular: #EDF0F4;
+    --node-border-regular: #C3CBD6;
+    --node-highlight-bg: #E3E8EF;
+    --edge-color: #A7B0BC;
+    --edge-label-color: #5C6673;
+    --edge-label-bg: #F5F7FA;
+    --dir-inout-bg: #E5DAF5;
+    --dir-inout-color: #7A4FB0;
+    --dir-in-bg: #CDEDE8;
+    --dir-out-bg: #FBE7CC;
+    --dir-prop-bg: #EDF0F480;
+
+    --scope-head-bg: #FBEBD3;
+    --scope-head-flowchart-bg: #EDE3F7;
+    --invoke-hover-bg: #DCE9F2;
+    --trace-active-color: #0E1318;
+    --amber-dim: #E8C48A;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    overflow: hidden;
+  }
+
+  #app {
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--border);
+    background: var(--panel);
+    flex-shrink: 0;
+    z-index: 10;
+  }
+
+  .brand {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+  }
+
+  .brand-mark {
+    font-family: var(--mono);
+    color: var(--teal);
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+  }
+
+  .brand-project {
+    font-size: 13px;
+    color: var(--muted);
+    padding-left: 10px;
+    border-left: 1px solid var(--border);
+  }
+
+  .rescan-hint {
+    font-size: 12px;
+    color: var(--muted-2);
+  }
+
+  .btn {
+    font-family: var(--sans);
+    font-size: 13.5px;
+    font-weight: 500;
+    padding: 8px 16px;
+    border-radius: 7px;
+    border: 1px solid var(--border);
+    background: var(--panel-2);
+    color: var(--text);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  .btn:hover { border-color: var(--muted-2); background: var(--btn-hover-bg); }
+  .btn.primary { background: var(--teal); color: var(--bg); border-color: var(--teal); font-weight: 600; }
+  .btn.primary:hover { background: var(--btn-primary-hover); }
+  .btn.toggle-on { background: var(--teal-dim); border-color: var(--teal); color: var(--teal); }
+
+  /* Deliberately inverted from the surrounding .btn palette: this button always
+     hints at the theme it switches TO, not the one currently active, so it reads
+     as "press me for light" while in dark mode and vice versa - the same pattern
+     GitHub/VS Code use rather than blending in with the neutral toolbar buttons. */
+  .btn.theme-toggle {
+    background: var(--text);
+    color: var(--bg);
+    border-color: var(--text);
+    font-weight: 600;
+  }
+  .btn.theme-toggle:hover { background: var(--muted); border-color: var(--muted); }
+
+  input[type="file"] { display: none; }
+
+  .stat {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    color: var(--muted);
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+  .stat b { color: var(--text); font-weight: 600; }
+  .stat.warn { color: var(--danger); }
+  .stat.warn b { color: var(--danger); }
+
+  main {
+    flex: 1;
+    position: relative;
+    min-height: 0;
+  }
+
+  #network { width: 100%; height: 100%; background: var(--bg); }
+
+  #empty-state {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 18px;
+    text-align: center;
+  }
+  #empty-state .icon {
+    width: 56px; height: 56px;
+    border: 1.5px dashed var(--muted-2);
+    border-radius: 12px;
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--mono);
+    font-size: 22px;
+    color: var(--muted-2);
+  }
+  #empty-state h2 { font-size: 17px; font-weight: 600; margin: 0; color: var(--text); }
+  #empty-state p { font-size: 13.5px; color: var(--muted); margin: 0; max-width: 360px; line-height: 1.6; }
+
+  .legend {
+    position: absolute;
+    bottom: 18px;
+    left: 18px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 12px 14px;
+    font-size: 12px;
+    color: var(--muted);
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    z-index: 5;
+  }
+  .legend-row { display: flex; align-items: center; gap: 8px; }
+  .legend-swatch { width: 12px; height: 12px; border-radius: 3px; flex-shrink: 0; }
+
+  .arg-note {
+    position: absolute;
+    top: 18px;
+    left: 18px;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 9px 13px;
+    font-size: 12px;
+    color: var(--muted);
+    max-width: 300px;
+    line-height: 1.5;
+    z-index: 5;
+    display: none;
+  }
+  .arg-note.visible { display: block; }
+  .arg-note b { color: var(--amber); }
+
+  /* Drawer CSS (shell, activity flow, variable tracing) now lives in the extracted
+     drawer fragment - see the drawer placeholder further down this file. Shared
+     pieces below stay here because non-drawer markup (the legend, the edge tooltip)
+     also uses them. */
+  .legend-line {
+    width: 16px !important;
+    height: 2px !important;
+    border-radius: 0 !important;
+    background: var(--teal) !important;
+  }
+
+  .dir-pill {
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 600;
+    padding: 2px 6px;
+    border-radius: 4px;
+    flex-shrink: 0;
+    min-width: 32px;
+    text-align: center;
+  }
+  .dir-in { background: var(--dir-in-bg); color: var(--teal); }
+  .dir-out { background: var(--dir-out-bg); color: var(--amber); }
+  .dir-inout { background: var(--dir-inout-bg); color: var(--dir-inout-color); }
+  .dir-prop { background: var(--dir-prop-bg); color: var(--muted); }
+
+  .coming-soon {
+    border: 1px dashed var(--border);
+    border-radius: 8px;
+    padding: 12px 14px;
+    font-size: 12px;
+    color: var(--muted-2);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .coming-soon .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--muted-2); flex-shrink: 0; }
+
+  .expand-badge-layer {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 8;
+  }
+  .expand-badge {
+    position: absolute;
+    transform: translate(-50%, -50%);
+    pointer-events: auto;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 8px;
+    border-radius: 999px;
+    background: var(--panel-2);
+    border: 1px solid var(--teal-dim);
+    color: var(--teal);
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1;
+    cursor: pointer;
+    white-space: nowrap;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.35);
+    user-select: none;
+    transition: background 0.12s, border-color 0.12s, color 0.12s;
+  }
+  .expand-badge:hover { background: #232C38; border-color: var(--teal); }
+  .expand-badge.expanded { color: var(--amber); border-color: var(--amber); }
+  .expand-badge .arrow { font-size: 9px; }
+
+  ::-webkit-scrollbar { width: 8px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+  .vis-tooltip {
+    max-width: none !important;
+    background: var(--panel) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 10px !important;
+    color: var(--text) !important;
+    padding: 0 !important;
+    box-shadow: 0 10px 28px rgba(0,0,0,0.45) !important;
+  }
+
+  /* Edge-tooltip CSS now lives in the extracted fragment (see the edge-tooltip placeholder below) */
+</style>
+</head>
+<body>
+
+<script type="text/plain" id="embedded-catalog-data">__CATALOG_JSON_B64_PLACEHOLDER__</script>
+<script type="text/plain" id="raw-template-source">__RAW_TEMPLATE_B64_PLACEHOLDER__</script>
+<script type="text/plain" id="ai-exports-data">__AI_EXPORTS_JSON_PLACEHOLDER__</script>
+<script type="text/plain" id="ai-file-exports-data">__AI_FILE_EXPORTS_JSON_PLACEHOLDER__</script>
+<script type="text/plain" id="ai-prompts-data">__AI_PROMPTS_JSON_PLACEHOLDER__</script>
+<script type="text/plain" id="ai-panel-source-b64">__AI_PANEL_B64_PLACEHOLDER__</script>
+<script type="text/plain" id="edge-tooltip-source-b64">__EDGE_TOOLTIP_B64_PLACEHOLDER__</script>
+<script type="text/plain" id="drawer-source-b64">__DRAWER_B64_PLACEHOLDER__</script>
+<div id="app">
+  <header>
+  <div class="brand">
+    <span class="brand-mark">FlowMap</span>
+    <span class="brand-project" id="brandProject" style="display:none;"></span>
+  </div>
+  <button class="btn" id="loadBtn" title="Open a previously generated catalog file">📂 Load another catalog</button>
+  <input type="file" id="fileInput" accept=".json">
+  <span class="rescan-hint" id="rescanHint" title="This map is a static snapshot - it can't trigger a new scan on its own">To scan a different project, run the FlowMap tool again.</span>
+ <div id="stats" style="display:flex; gap:16px;"></div>
+ <button class="btn" id="editModeToggle" title="Toggle editing activity notes in the side panel">✏️ Edit Notes</button>
+ <button class="btn" id="saveMapBtn" title="Save a copy of the map, including your notes, as a new HTML file">💾 Save As...</button>
+ <button class="btn primary" id="askAiBtn" title="Send structured project data to AI for debugging or generating documentation">🤖 Ask AI</button>
+ <button class="btn" id="expandAllBtn" title="Expand all files in the map">⊞ Expand All</button>
+ <button class="btn" id="collapseAllBtn" title="Return to Main file view only">⊟ Collapse All</button>
+ <button class="btn theme-toggle" id="themeToggle" title="Toggle between dark and light mode">☀️ Light Mode</button>
+</header>
+  <main>
+    <div id="empty-state">
+      <div class="icon">{ }</div>
+      <h2>No data loaded yet</h2>
+      <p>Select the <code style="color:var(--teal)">_xaml_catalog.json</code> file generated by the scanner to view the file map and their relationships.</p>
+    </div>
+    <div id="network"></div>
+    <div class="expand-badge-layer" id="expandBadgeLayer"></div>
+    __EDGE_TOOLTIP_PLACEHOLDER__
+    <div class="legend" id="legend" style="display:none;">
+      <div class="legend-row"><span class="legend-swatch" style="background:var(--amber)"></span> Entry point (not invoked by any file)</div>
+      <div class="legend-row"><span class="legend-swatch" style="background:var(--violet)"></span> Framework file</div>
+      <div class="legend-row"><span class="legend-swatch" style="background:var(--node-border-regular)"></span> Regular file</div>
+      <div class="legend-row"><span class="legend-swatch" style="background:var(--danger)"></span> Parse error / unresolved invocation</div>
+      <div class="legend-row"><span class="legend-swatch legend-line"></span> Hover over an arrow to see which arguments are passed</div>
+      <div class="legend-row"><span class="legend-swatch" style="background:transparent; border:1px solid var(--teal-dim); border-radius:999px; color:var(--teal); font-family:var(--mono); font-size:9px; display:flex; align-items:center; justify-content:center;">▶3</span> Click the badge next to a file to show/hide its direct children</div>
+    </div>
+    __DRAWER_PLACEHOLDER__
+  </main>
+</div>
+
+<script>
+  // Data for the AI panel (see ai_panel.html). Read from the text/plain elements
+  // above rather than injected as a raw JS literal - same reasoning as the catalog
+  // itself (see open_project_map's docstring in report.py): keeps arbitrary export
+  // text (which may contain characters awkward in a JS string literal, e.g. "</script"
+  // if a workflow's own DisplayName or annotation contained it) out of parseable JS
+  // source entirely. JSON.parse handles that safely; a raw literal wouldn't.
+  const AI_EXPORTS = JSON.parse(document.getElementById('ai-exports-data').textContent);
+  // Keyed by relative_path (not by purpose, unlike AI_EXPORTS) - see
+  // ai_export.build_all_file_exports and ai_panel.html's openAiModal('file', path).
+  const AI_FILE_EXPORTS = JSON.parse(document.getElementById('ai-file-exports-data').textContent);
+  const AI_PROMPTS = JSON.parse(document.getElementById('ai-prompts-data').textContent);
+</script>
+
+__AI_PANEL_PLACEHOLDER__
+
+<script>
+let network = null;
+let catalogData = null;
+let nodesDataSet, edgesDataSet;
+let pinnedEdgeId = null;
+let lastMouseX = 0, lastMouseY = 0;
+let showFullFlow = false;
+let currentDrawerFile = null;
+let editMode = false;
+let notesStore = {};
+
+// --- Expand/collapse tree state ---------------------------------------
+// The full catalog is always parsed, but by default only the entry-point
+// file(s) are shown. childrenOf/allNodesData/allEdgesList hold the FULL
+// graph. Visibility is drill-down/accordion style: activePath holds the
+// exact chain of nodes the user clicked through to reach the currently
+// focused node (root -> ... -> focused node), and the only things ever
+// visible are that chain plus the focused node's direct children - every
+// sibling branch (open or not) disappears the moment a different node is
+// focused. expandAll/collapseAll bypass this and show/hide everything.
+let childrenOf = {};       // relative_path -> [direct child relative_path, ...] (deduped)
+let parentOf = {};         // relative_path -> one invoking parent's relative_path (first seen;
+                            // a file can have several - we only need *a* valid chain back to a root)
+let allNodesData = {};     // relative_path -> vis-network node object
+let allEdgesList = [];     // every edge object (from the full catalog), each with a unique id
+let rootIds = [];          // relative_path list of default-visible (collapsed) root nodes
+let expandedSet = new Set(); // used only for the expandAll/collapseAll "show everything" mode
+let activePath = [];       // [] when in expandAll/collapseAll mode; otherwise [root, ..., focusedNode]
+const badgeLayer = document.getElementById('expandBadgeLayer');
+const badgeElements = {};  // relative_path -> DOM element, reused across re-renders
+
+document.getElementById('network').addEventListener('mousemove', function (e) {
+  lastMouseX = e.clientX;
+  lastMouseY = e.clientY;
+});
+
+function escapeHtml(s) {
+  return String(s === undefined || s === null ? '' : s).replace(/[&<>"']/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+}
+
+// vis-network draws to <canvas>, so it can't pick up CSS variables directly -
+// this mirrors the --node-*/--edge-* custom properties from the stylesheet
+// for both themes, so buildGraph() can color nodes/edges to match the
+// current mode.
+function getGraphPalette() {
+  const light = document.documentElement.classList.contains('light-mode');
+  return light ? {
+    nodeText: '#1B222C',
+    nodeBgError: '#F6D9D5', nodeBorderError: '#C23B2E',
+    nodeBgEntry: '#FBEBD3', nodeBorderEntry: '#B5720E',
+    nodeBgRegular: '#EDF0F4', nodeBorderRegular: '#C3CBD6',
+    nodeBorderFramework: '#7A4FB0',
+    nodeHighlightBg: '#E3E8EF', nodeHighlightBorder: '#1D9C90',
+    edgeColor: '#A7B0BC', edgeHighlight: '#1D9C90',
+    edgeLabelColor: '#5C6673', edgeLabelBg: '#F5F7FA'
+  } : {
+    nodeText: '#E7ECF2',
+    nodeBgError: '#4A2C29', nodeBorderError: '#E2685C',
+    nodeBgEntry: '#2A2115', nodeBorderEntry: '#F0A857',
+    nodeBgRegular: '#1D2530', nodeBorderRegular: '#3A4453',
+    nodeBorderFramework: '#B98FE8',
+    nodeHighlightBg: '#232C38', nodeHighlightBorder: '#4FD1C5',
+    edgeColor: '#3A4453', edgeHighlight: '#4FD1C5',
+    edgeLabelColor: '#8792A0', edgeLabelBg: '#0E1318'
+  };
+}
+
+function base64ToUtf8(b64) {
+  const binary = atob(b64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return new TextDecoder('utf-8').decode(bytes);
+}
+
+function utf8ToBase64(str) {
+  const bytes = new TextEncoder().encode(str);
+  let binary = '';
+  bytes.forEach(function (b) { binary += String.fromCharCode(b); });
+  return btoa(binary);
+}
+
+// Edge-tooltip functions (directionLabel, directionMeta, buildEdgeTooltip,
+// showEdgeTooltip, positionEdgeTooltip, hideEdgeTooltip) now live in the
+// extracted fragment injected at the edge-tooltip placeholder above. They rely
+// on the globals declared just above (edgesDataSet, pinnedEdgeId, lastMouseX/Y).
+
+// Drawer functions (noteKey, renderNoteSpan, renderAnnotation, wrapVarRefs,
+// renderArgRows, renderFlowSteps, renderFlowNode, renderFlowInto, wireNoteEditing,
+// wireVarRefs, countDeclOccurrences, setActiveTrace, updateTraceCurrent,
+// applyNoteEditability) now live in the extracted drawer fragment injected at
+// the drawer placeholder. They rely on the globals declared above (notesStore,
+// showFullFlow, currentDrawerFile, editMode) and on escapeHtml/directionMeta/
+// directionLabel.
+
+
+const editModeToggle = document.getElementById('editModeToggle');
+editModeToggle.addEventListener('click', function () {
+  editMode = !editMode;
+  editModeToggle.classList.toggle('toggle-on', editMode);
+  editModeToggle.textContent = editMode ? 'Editing Notes (on)' : 'Edit Notes';
+  document.body.classList.toggle('notes-editable', editMode);
+  applyNoteEditability();
+});
+
+const themeToggle = document.getElementById('themeToggle');
+(function initTheme() {
+  let saved = null;
+  try { saved = localStorage.getItem('projectMapTheme'); } catch (e) { /* offline file:// contexts may block storage */ }
+  if (saved === 'light') applyTheme(true);
+})();
+themeToggle.addEventListener('click', function () {
+  applyTheme(!document.documentElement.classList.contains('light-mode'));
+});
+function applyTheme(light) {
+  document.documentElement.classList.toggle('light-mode', light);
+  themeToggle.innerHTML = light ? '🌙 Dark Mode' : '☀️ Light Mode';
+  try { localStorage.setItem('projectMapTheme', light ? 'light' : 'dark'); } catch (e) { /* ignore */ }
+  // Node/edge colors are baked into the vis-network DataSet as hex strings
+  // (canvas can't read CSS vars), so re-run buildGraph to recolor them
+  // against the new theme once data is already loaded.
+  if (catalogData) buildGraph(catalogData);
+}
+
+document.getElementById('saveMapBtn').addEventListener('click', saveMapAsHtml);
+
+async function saveMapAsHtml() {
+  if (!catalogData) {
+    alert('Load a project catalog first.');
+    return;
+  }
+
+  // Built via concatenation on purpose: Python's report.py does a blind, global text
+  // replace of the exact placeholder strings across the whole template file. If the
+  // literal placeholder text appeared here as one contiguous string, Python would ALSO
+  // replace this occurrence (not just the one inside the <script type="text/plain">
+  // tags) - silently injecting the entire 650KB vis-network library / catalog JSON as a
+  // raw, unescaped string literal into this function, which breaks JS parsing. Splitting
+  // the string across a concatenation means it never appears as one exact substring in
+  // the file that Python scans, while still evaluating to the correct full string here
+  // at runtime.
+  const CATALOG_PLACEHOLDER = '__CATALOG_JSON_B64_PLACEHOLDER' + '__';
+  const VISLIB_PLACEHOLDER = '__VIS_NETWORK_JS_PLACEHOLDER' + '__';
+  const RAWTPL_PLACEHOLDER = '__RAW_TEMPLATE_B64_PLACEHOLDER' + '__';
+  // Same split-concatenation reasoning as above, applied to the three AI-panel
+  // placeholders: without it, Python's global replace in report.py would also
+  // match (and corrupt) these string literals the first time the file is generated.
+  const AIEXPORTS_PLACEHOLDER = '__AI_EXPORTS_JSON_PLACEHOLDER' + '__';
+  const AIFILEEXPORTS_PLACEHOLDER = '__AI_FILE_EXPORTS_JSON_PLACEHOLDER' + '__';
+  const AIPROMPTS_PLACEHOLDER = '__AI_PROMPTS_JSON_PLACEHOLDER' + '__';
+  const AIPANEL_PLACEHOLDER = '__AI_PANEL_PLACEHOLDER' + '__';
+  // Same split-concatenation reasoning again, for the extracted edge-tooltip fragment.
+  const EDGETOOLTIP_PLACEHOLDER = '__EDGE_TOOLTIP_PLACEHOLDER' + '__';
+  // Same reasoning again, for the extracted drawer fragment.
+  const DRAWER_PLACEHOLDER = '__DRAWER_PLACEHOLDER' + '__';
+
+  const merged = JSON.parse(JSON.stringify(catalogData));
+  const notesByFile = {};
+  Object.keys(notesStore).forEach(function (key) {
+    const parts = key.split('||');
+    const filePath = parts[0];
+    const nodeId = parts[1];
+    const text = notesStore[key];
+    if (!text || !text.trim()) return;
+    if (!notesByFile[filePath]) notesByFile[filePath] = {};
+    notesByFile[filePath][nodeId] = text;
+  });
+  (merged.files || []).forEach(function (f) {
+    if (notesByFile[f.relative_path]) {
+      f.notes = notesByFile[f.relative_path];
+    }
+  });
+
+  const rawTemplateEl = document.getElementById('raw-template-source');
+  const visLibEl = document.getElementById('vis-network-lib');
+  if (!rawTemplateEl || !visLibEl) {
+    alert('This map was generated by an older version of the scanner and cannot regenerate a standalone file. Please re-scan the project with the updated tool.');
+    return;
+  }
+
+  const rawTemplate = base64ToUtf8(rawTemplateEl.textContent.trim());
+  const visLibSrc = visLibEl.textContent;
+
+  const catalogB64 = utf8ToBase64(JSON.stringify(merged));
+  const rawTemplateB64 = utf8ToBase64(rawTemplate);
+
+  let outputHtml = rawTemplate.split(CATALOG_PLACEHOLDER).join(catalogB64);
+  outputHtml = outputHtml.split(VISLIB_PLACEHOLDER).join(visLibSrc);
+  outputHtml = outputHtml.split(RAWTPL_PLACEHOLDER).join(rawTemplateB64);
+
+  // Carry the AI panel (data + HTML fragment) forward into the regenerated file too
+  // - without this, a map re-saved via "Save As" would silently lose a working
+  // "Ask AI" button (and the drawer's "Ask AI about this file" button), since the
+  // raw template's placeholders are otherwise only ever filled in by report.py at
+  // original-generation time, not by this in-browser path. All four payloads are
+  // stored as their own text/plain elements (mirroring raw-template-source)
+  // precisely so this path can read them back verbatim without needing to
+  // re-derive them from the live, already-rendered DOM.
+  const aiExportsEl = document.getElementById('ai-exports-data');
+  const aiFileExportsEl = document.getElementById('ai-file-exports-data');
+  const aiPromptsEl = document.getElementById('ai-prompts-data');
+  const aiPanelEl = document.getElementById('ai-panel-source-b64');
+  if (aiExportsEl && aiFileExportsEl && aiPromptsEl && aiPanelEl) {
+    outputHtml = outputHtml.split(AIEXPORTS_PLACEHOLDER).join(aiExportsEl.textContent);
+    outputHtml = outputHtml.split(AIFILEEXPORTS_PLACEHOLDER).join(aiFileExportsEl.textContent);
+    outputHtml = outputHtml.split(AIPROMPTS_PLACEHOLDER).join(aiPromptsEl.textContent);
+    outputHtml = outputHtml.split(AIPANEL_PLACEHOLDER).join(base64ToUtf8(aiPanelEl.textContent.trim()));
+  }
+
+  // Carry the extracted edge-tooltip fragment (CSS + markup + JS) forward too,
+  // for the same reason as the AI panel above: report.py only fills this
+  // placeholder in at original-generation time.
+  const edgeTooltipEl = document.getElementById('edge-tooltip-source-b64');
+  if (edgeTooltipEl) {
+    outputHtml = outputHtml.split(EDGETOOLTIP_PLACEHOLDER).join(base64ToUtf8(edgeTooltipEl.textContent.trim()));
+  }
+
+  // Carry the extracted drawer fragment (CSS + markup + JS) forward too, for the
+  // same reason as the other fragments above.
+  const drawerEl = document.getElementById('drawer-source-b64');
+  if (drawerEl) {
+    outputHtml = outputHtml.split(DRAWER_PLACEHOLDER).join(base64ToUtf8(drawerEl.textContent.trim()));
+  }
+
+  const suggestedName = 'project_map_annotated.html';
+  const blob = new Blob([outputHtml], { type: 'text/html' });
+
+  if (window.showSaveFilePicker) {
+    try {
+      const handle = await window.showSaveFilePicker({
+        suggestedName: suggestedName,
+        types: [{ description: 'HTML file', accept: { 'text/html': ['.html'] } }]
+      });
+      const writable = await handle.createWritable();
+      await writable.write(blob);
+      await writable.close();
+      return;
+    } catch (err) {
+      if (err && err.name === 'AbortError') return;
+    }
+  }
+
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = suggestedName;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+const fileInput = document.getElementById('fileInput');
+const loadBtn = document.getElementById('loadBtn');
+const emptyState = document.getElementById('empty-state');
+const statsEl = document.getElementById('stats');
+const legendEl = document.getElementById('legend');
+
+loadBtn.addEventListener('click', function () { fileInput.click(); });
+fileInput.addEventListener('change', function (e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function (evt) {
+    try {
+      catalogData = JSON.parse(evt.target.result);
+      buildGraph(catalogData);
+    } catch (err) {
+      alert('Failed to parse the file as valid JSON: ' + err.message);
+    }
+  };
+  reader.readAsText(file, 'utf-8');
+});
+
+let currentByPath = {};
+
+function deriveProjectName(catalog) {
+  const root = catalog && catalog.project_root;
+  if (!root) return '';
+  const normalized = root.replace(/[\\/]+$/, '');
+  const parts = normalized.split(/[\\/]/);
+  return parts[parts.length - 1] || '';
+}
+
+const brandProjectEl = document.getElementById('brandProject');
+
+function buildGraph(catalog) {
+  emptyState.style.display = 'none';
+  legendEl.style.display = 'flex';
+  pinnedEdgeId = null;
+  hideEdgeTooltip();
+
+  const projectName = deriveProjectName(catalog);
+  if (projectName) {
+    brandProjectEl.textContent = projectName;
+    brandProjectEl.style.display = 'inline';
+  } else {
+    brandProjectEl.style.display = 'none';
+  }
+
+  const files = catalog.files || [];
+  const byPath = {};
+  files.forEach(function (f) { byPath[f.relative_path] = f; });
+  currentByPath = byPath;
+
+  notesStore = {};
+  files.forEach(function (f) {
+    if (f.notes) {
+      Object.keys(f.notes).forEach(function (nodeId) {
+        notesStore[f.relative_path + '||' + nodeId] = f.notes[nodeId];
+      });
+    }
+  });
+
+  // --- Build the FULL node set (every file becomes a node object, but not
+  // all of them are necessarily added to the live DataSet at any given time) ---
+  allNodesData = {};
+  const palette = getGraphPalette();
+  files.forEach(function (f) {
+    const isEntry = f.parse_ok && (f.invoked_by || []).length === 0;
+    const isError = !f.parse_ok;
+    // Framework files: anything under a top-level "Framework" folder in the
+    // project (relative_path e.g. "Framework/InitAllSettings.xaml"). Entry
+    // status takes priority over this - a Framework file is not expected to
+    // also be an entry point, but if it ever is, the amber entry border wins.
+    const isFramework = !isEntry && /(^|[\\/])Framework([\\/]|$)/i.test(f.relative_path || '');
+
+    allNodesData[f.relative_path] = {
+      id: f.relative_path,
+      label: f.file_name,
+      shape: 'box',
+      margin: 12,
+      font: { face: 'IBM Plex Mono', size: 13, color: palette.nodeText },
+      color: {
+        background: isError ? palette.nodeBgError : (isEntry ? palette.nodeBgEntry : palette.nodeBgRegular),
+        border: isError ? palette.nodeBorderError : (isEntry ? palette.nodeBorderEntry : (isFramework ? palette.nodeBorderFramework : palette.nodeBorderRegular)),
+        highlight: { background: palette.nodeHighlightBg, border: palette.nodeHighlightBorder },
+        hover: { background: palette.nodeHighlightBg, border: palette.nodeHighlightBorder }
+      },
+      borderWidth: isEntry ? 2 : (isFramework ? 2 : 1),
+      shapeProperties: { borderRadius: 8 },
+      widthConstraint: { minimum: 110 }
+    };
+  });
+
+  // --- Build the FULL edge list and, from it, a deduped direct-children map ---
+  allEdgesList = [];
+  childrenOf = {};
+  parentOf = {};
+  files.forEach(function (f) { childrenOf[f.relative_path] = []; });
+
+  files.forEach(function (f) {
+    const seenChildren = new Set();
+    (f.invokes || []).forEach(function (inv, idx) {
+      if (inv.target_relative_path && byPath[inv.target_relative_path]) {
+        const bindings = inv.argument_bindings || [];
+        allEdgesList.push({
+          id: f.relative_path + '=>' + inv.target_relative_path + '#' + idx,
+          from: f.relative_path,
+          to: inv.target_relative_path,
+          arrows: 'to',
+          color: { color: palette.edgeColor, highlight: palette.edgeHighlight, hover: palette.edgeHighlight },
+          width: bindings.length ? Math.min(1.4 + bindings.length * 0.5, 6) : 1.4,
+          smooth: { type: 'cubicBezier', roundness: 0.5 },
+          argBindings: bindings,
+          label: bindings.length ? '<->' : '',
+          font: { align: 'middle' }
+        });
+        if (!seenChildren.has(inv.target_relative_path)) {
+          seenChildren.add(inv.target_relative_path);
+          childrenOf[f.relative_path].push(inv.target_relative_path);
+          if (!(inv.target_relative_path in parentOf)) {
+            parentOf[inv.target_relative_path] = f.relative_path;
+          }
+        }
+      }
+    });
+  });
+
+  // --- Default roots: files nobody invokes (the "main" entry points) ---
+  // Fall back to covering any file left unreached (e.g. a pure invoke cycle
+  // with no natural entry point) so nothing is permanently hidden.
+  const invokedByCount = {};
+  files.forEach(function (f) { invokedByCount[f.relative_path] = 0; });
+  allEdgesList.forEach(function (e) { invokedByCount[e.to] = (invokedByCount[e.to] || 0) + 1; });
+
+  rootIds = files.map(function (f) { return f.relative_path; })
+    .filter(function (p) { return invokedByCount[p] === 0; });
+
+  const reached = new Set();
+  function markReachable(p) {
+    if (reached.has(p)) return;
+    reached.add(p);
+    (childrenOf[p] || []).forEach(markReachable);
+  }
+  rootIds.forEach(markReachable);
+  files.forEach(function (f) {
+    if (!reached.has(f.relative_path)) {
+      rootIds.push(f.relative_path);
+      markReachable(f.relative_path);
+    }
+  });
+
+  expandedSet = new Set();
+  activePath = [];
+
+  const container = document.getElementById('network');
+  nodesDataSet = new vis.DataSet([]);
+  edgesDataSet = new vis.DataSet([]);
+  const data = { nodes: nodesDataSet, edges: edgesDataSet };
+  const options = {
+    layout: {
+      hierarchical: {
+        enabled: true,
+        direction: 'UD',
+        sortMethod: 'directed',
+        nodeSpacing: 220,
+        levelSeparation: 110,
+        treeSpacing: 220
+      }
+    },
+    physics: { enabled: false },
+    interaction: { hover: true, tooltipDelay: 120 },
+    edges: { font: { color: palette.edgeLabelColor, size: 11, face: 'IBM Plex Mono', strokeWidth: 0, background: palette.edgeLabelBg } }
+  };
+
+  if (network) { network.destroy(); }
+  network = new vis.Network(container, data, options);
+
+  network.on('click', function (params) {
+    if (params.nodes.length > 0) {
+      pinnedEdgeId = null;
+      hideEdgeTooltip();
+      openDrawer(params.nodes[0], byPath);
+      return;
+    }
+    if (params.edges.length > 0) {
+      const edgeId = params.edges[0];
+      if (pinnedEdgeId === edgeId) {
+        pinnedEdgeId = null;
+        hideEdgeTooltip();
+      } else {
+        pinnedEdgeId = edgeId;
+        showEdgeTooltip(edgeId, true);
+      }
+      return;
+    }
+    pinnedEdgeId = null;
+    hideEdgeTooltip();
+    closeDrawer();
+  });
+
+  network.on('hoverEdge', function (params) {
+    if (pinnedEdgeId) return;
+    showEdgeTooltip(params.edge, false);
+  });
+
+  network.on('blurEdge', function () {
+    if (pinnedEdgeId) return;
+    hideEdgeTooltip();
+  });
+
+  network.on('dragStart', function () {
+    if (pinnedEdgeId) { pinnedEdgeId = null; hideEdgeTooltip(); }
+  });
+
+  network.on('zoom', function () {
+    if (pinnedEdgeId) { pinnedEdgeId = null; hideEdgeTooltip(); }
+  });
+
+  network.on('afterDrawing', syncBadgePositions);
+
+  renderVisibleGraph();
+  updateStats(catalog, files);
+}
+
+// Computes which nodes should currently be rendered.
+// - In drill-down mode (activePath non-empty): only the active chain
+//   (root..focused node) plus the focused node's direct children.
+// - In expandAll/collapseAll mode (activePath empty): falls back to the
+//   original expandedSet-driven walk from all roots, so those two buttons
+//   keep behaving exactly as before.
+function computeVisibleNodeIds() {
+  if (activePath.length > 0) {
+    const visible = new Set(activePath);
+    const focused = activePath[activePath.length - 1];
+    (childrenOf[focused] || []).forEach(function (child) { visible.add(child); });
+    return visible;
+  }
+
+  const visible = new Set();
+  const queue = [];
+  rootIds.forEach(function (r) { visible.add(r); queue.push(r); });
+  while (queue.length) {
+    const cur = queue.shift();
+    if (expandedSet.has(cur)) {
+      (childrenOf[cur] || []).forEach(function (child) {
+        if (!visible.has(child)) {
+          visible.add(child);
+          queue.push(child);
+        }
+      });
+    }
+  }
+  return visible;
+}
+
+// Re-derives the visible node/edge DataSets from the current mode and redraws the badges.
+function renderVisibleGraph() {
+  const visible = computeVisibleNodeIds();
+
+  const nodesToShow = [];
+  visible.forEach(function (id) { if (allNodesData[id]) nodesToShow.push(allNodesData[id]); });
+
+  const edgesToShow = allEdgesList.filter(function (e) {
+    return visible.has(e.from) && visible.has(e.to);
+  });
+
+  nodesDataSet.clear();
+  nodesDataSet.add(nodesToShow);
+  edgesDataSet.clear();
+  edgesDataSet.add(edgesToShow);
+
+  renderBadges(visible);
+}
+
+// Recursively removes a node (and, transitively, anything only reachable
+// through it) from expandedSet. Only used by the expandAll/collapseAll
+// "show everything" mode now, but kept for that path.
+function collapseSubtree(nodeId) {
+  if (expandedSet.has(nodeId)) {
+    expandedSet.delete(nodeId);
+    (childrenOf[nodeId] || []).forEach(collapseSubtree);
+  }
+}
+
+// Called when the user clicks a node's "show children" badge. Drill-down/
+// accordion behavior: clicking an already-focused node's badge again closes
+// it back to its parent (or to nothing, if it was a root); clicking any
+// other node's badge - a sibling, a child, or a node reached via a fresh
+// root - re-focuses on that node instead, so only its own ancestor chain
+// and direct children stay visible and every other branch disappears.
+// Walks parentOf back from nodeId to a root, returning the full chain
+// [root, ..., nodeId]. Used to rebuild activePath from scratch when
+// navigating via a drawer link whose target isn't already anchored in the
+// current activePath (see revealNode below). Guards against a cyclic invoke
+// graph (A invokes B invokes A) by capping the walk at the total file count.
+function ancestorChainTo(nodeId) {
+  const chain = [nodeId];
+  let cur = nodeId;
+  let guard = Object.keys(childrenOf).length + 1;
+  while (parentOf[cur] !== undefined && guard-- > 0) {
+    cur = parentOf[cur];
+    if (chain.indexOf(cur) !== -1) break; // cycle guard
+    chain.unshift(cur);
+  }
+  return chain;
+}
+
+// Called by drawer-driven navigation (clicking an "Invoke: X" / "Invoked By:
+// Y" link inside the currently open drawer) rather than a map badge click.
+// fromNodeId is the file whose drawer the link was clicked in - the true
+// "parent" for this navigation - passed explicitly rather than inferred from
+// activePath, because activePath can be empty or stale here (e.g. the user
+// opened A's drawer by clicking A itself on the map, which - unlike a badge
+// click - never touches activePath at all; A is still visible as a root but
+// activePath is []).
+//
+// Deliberately does NOT focus onto nodeId the way toggleExpand does for a
+// direct child - focusing would make nodeId the last entry in activePath,
+// and computeVisibleNodeIds always also reveals the focused node's own
+// children. That's correct for an actual badge click (two clicks - one on
+// A's badge, one on B's - are two separate asks to drill deeper each time),
+// but a single drawer-link click on B is only "reveal B", not "and also
+// drill into B" - so nodeId is added as a visible child while fromNodeId (or
+// an ancestor chain ending at fromNodeId) stays focused. The one exception
+// is nodeId already being an ancestor of/equal to the current focus (idx
+// !== -1 below) - there it's correct to refocus there, matching what
+// re-clicking that badge would do.
+function revealNode(nodeId, fromNodeId) {
+  const idx = activePath.indexOf(nodeId);
+  if (idx !== -1) {
+    // Already part of the active chain (an ancestor of, or identical to,
+    // the current focus) - just refocus there, trimming what was below it.
+    activePath = activePath.slice(0, idx + 1);
+    renderVisibleGraph();
+    return;
+  }
+
+  const fromIdx = fromNodeId ? activePath.indexOf(fromNodeId) : -1;
+  if (fromIdx !== -1 && (childrenOf[fromNodeId] || []).indexOf(nodeId) !== -1) {
+    // fromNodeId is already part of the active chain (anywhere in it, not
+    // just at the end - e.g. re-opening an ancestor's drawer) and nodeId is
+    // really its child - trim anything focused deeper than fromNodeId (so a
+    // stale drill-down below it doesn't linger) but keep fromNodeId's own
+    // ancestor chain intact and focused; nodeId shows up as its child.
+    activePath = activePath.slice(0, fromIdx + 1);
+  } else if (fromNodeId && (childrenOf[fromNodeId] || []).indexOf(nodeId) !== -1) {
+    // fromNodeId is a real parent of nodeId but isn't anywhere in
+    // activePath right now (e.g. it's only visible as an unexpanded root,
+    // activePath was emptied, or activePath is currently focused on a
+    // different branch entirely). Rebuild fromNodeId's own full ancestor
+    // chain from a root - not just [fromNodeId] alone - so anything above
+    // it stays visible too, then focus there; nodeId appears as its child.
+    activePath = ancestorChainTo(fromNodeId);
+  } else if (rootIds.indexOf(nodeId) !== -1) {
+    // A genuine root with no relevant parent context - focus on it alone.
+    activePath = [nodeId];
+  } else {
+    // Last resort: nodeId isn't reachable from fromNodeId at all (e.g. the
+    // drawer's "Invoked By" list can point to a file anywhere else in the
+    // graph). Rebuild nodeId's own ancestor chain so it's shown with its
+    // real ancestry rather than isolated.
+    activePath = ancestorChainTo(nodeId);
+  }
+  renderVisibleGraph();
+}
+
+function toggleExpand(nodeId) {
+  const currentlyFocused = activePath[activePath.length - 1];
+  if (currentlyFocused === nodeId) {
+    // Toggling the focused node closed: step focus back up to its parent
+    // (the previous entry in the path), or clear entirely if it was a root.
+    activePath.pop();
+  } else {
+    const childIndex = activePath.indexOf(nodeId);
+    if (childIndex !== -1) {
+      // Clicked a node that's already part of the active chain (an
+      // ancestor of the current focus) - refocus there, trimming what
+      // was below it.
+      activePath = activePath.slice(0, childIndex + 1);
+    } else if (rootIds.indexOf(nodeId) !== -1) {
+      // A different root entirely.
+      activePath = [nodeId];
+    } else {
+      // A direct child of the currently focused node (the normal case -
+      // clicking a badge that just became visible under the focused node).
+      activePath = activePath.concat([nodeId]);
+    }
+  }
+  renderVisibleGraph();
+}
+
+function expandAll() {
+  activePath = []; // leave drill-down mode - show everything via expandedSet instead
+  Object.keys(childrenOf).forEach(function (id) {
+    if (childrenOf[id].length > 0) expandedSet.add(id);
+  });
+  renderVisibleGraph();
+}
+
+function collapseAll() {
+  activePath = []; // back to the default: only root(s) visible, nothing focused
+  expandedSet = new Set();
+  renderVisibleGraph();
+}
+
+// Draws/updates the small "expand children" badges as DOM elements positioned
+// next to each visible node that has children - kept outside the vis-network
+// canvas itself so clicking a badge never triggers the node's own click
+// handler (which opens the activity drawer).
+function renderBadges(visibleIds) {
+  const keep = new Set();
+
+  visibleIds.forEach(function (id) {
+    const kids = childrenOf[id] || [];
+    if (kids.length === 0) return;
+    keep.add(id);
+
+    let el = badgeElements[id];
+    if (!el) {
+      el = document.createElement('div');
+      el.className = 'expand-badge';
+      el.addEventListener('click', function (ev) {
+        ev.stopPropagation();
+        toggleExpand(id);
+      });
+      badgeLayer.appendChild(el);
+      badgeElements[id] = el;
+    }
+
+    const isOpen = activePath.length > 0
+      ? (activePath[activePath.length - 1] === id)
+      : expandedSet.has(id);
+    el.classList.toggle('expanded', isOpen);
+    el.title = isOpen ? 'Hide direct children' : 'Show direct children (' + kids.length + ')';
+    el.innerHTML = '<span class="arrow">' + (isOpen ? '▼' : '▶') + '</span><span>' + kids.length + '</span>';
+  });
+
+  Object.keys(badgeElements).forEach(function (id) {
+    if (!keep.has(id)) {
+      badgeElements[id].remove();
+      delete badgeElements[id];
+    }
+  });
+
+  syncBadgePositions();
+}
+
+// Keeps badge DOM elements glued to the right edge of their node, in DOM
+// coordinate space, as the network pans/zooms/re-layouts.
+function syncBadgePositions() {
+  if (!network) return;
+  Object.keys(badgeElements).forEach(function (id) {
+    let box;
+    try { box = network.getBoundingBox(id); } catch (e) { return; }
+    if (!box) return;
+    const anchor = network.canvasToDOM({ x: box.left - 14, y: (box.top + box.bottom) / 2 });
+    const el = badgeElements[id];
+    el.style.left = anchor.x + 'px';
+    el.style.top = anchor.y + 'px';
+  });
+}
+
+function updateStats(catalog, files) {
+  const unresolved = (catalog.unresolved_invocations || []).length;
+  let html = '<span class="stat">Files: <b>' + files.length + '</b></span>';
+  html += '<span class="stat">Connections: <b>' + allEdgesList.length + '</b></span>';
+  if (unresolved > 0) {
+    html += '<span class="stat warn">Unresolved: <b>' + unresolved + '</b></span>';
+  }
+  statsEl.innerHTML = html;
+}
+
+document.getElementById('expandAllBtn').addEventListener('click', expandAll);
+document.getElementById('collapseAllBtn').addEventListener('click', collapseAll);
+window.addEventListener('resize', syncBadgePositions);
+
+// Drawer element refs, toggle wiring (varsToggle, fullViewToggle, drawerClose),
+// and closeDrawer/openDrawer now live in the extracted drawer fragment injected
+// at the drawer placeholder. openDrawer is called below from the network click
+// handler, and from the drawer fragment itself when navigating via Invokes/
+// Invoked By links or an inline Invoke: step.
+
+
+window.addEventListener('DOMContentLoaded', function () {
+  const embedded = document.getElementById('embedded-catalog-data');
+  const raw = embedded ? embedded.textContent.trim() : '';
+  if (raw) {
+    try {
+      catalogData = JSON.parse(base64ToUtf8(raw));
+      buildGraph(catalogData);
+    } catch (e) {
+      console.error('Failed to load embedded data:', e);
+    }
+  }
+});
+</script>
+</body>
+</html>

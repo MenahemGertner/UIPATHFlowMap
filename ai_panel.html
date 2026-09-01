@@ -1,0 +1,481 @@
+<!--
+  AI Panel - self-contained fragment injected into project_map.html by report.py
+  (a text-substitution placeholder in project_map.html is replaced with this whole
+  file's contents, same mechanism already used for vis-network.min.js). Kept as its
+  own file rather than added inline to project_map.html to keep that file's existing
+  style/script blocks untouched - see architecture discussion: this feature is a
+  separable "panel", not core map rendering.
+
+  NOTE: this file must never contain the literal placeholder token that
+  report.py searches for (spelled out fully, double-underscore-wrapped) anywhere
+  in its own text, including comments - report.py's substitution is a blind
+  string search/replace, so a stray literal occurrence here would either be
+  matched and corrupted, or (if it appears after the real substitution point)
+  left sitting unreplaced in the output. Describe such tokens in prose instead of
+  spelling them out, as done above.
+
+  Depends on globals already present on window by the time this script runs
+  (injected by report.py the same way catalog data is):
+    - AI_EXPORTS: { purpose_key: <compact whole-project data text from ai_export.py's
+      build_all_exports> } - used when the modal is opened in "project" scope.
+    - AI_FILE_EXPORTS: { relative_path: { purpose_key: <compact single-file data text
+      from ai_export.py's build_all_file_exports> } } - used when the modal is opened
+      in "file" scope. May be absent entirely on older reports generated before this
+      feature existed; handled the same way as an empty AI_EXPORTS (see
+      buildPurposeList below) rather than throwing.
+    - AI_PROMPTS: { purpose_key: <instruction text from prompts.py> } - one shared
+      registry for both scopes. A purpose key only ever needs one prompt regardless
+      of whether it's answered against the whole project or a single file, so
+      "file_summary"/"file_debug" live in this same object rather than a second one.
+  All three are keyed by purpose key identically (see prompts.py docstring - purpose
+  keys are a shared contract between ai_export.py and prompts.py). This file does not
+  know how to build those texts - it only combines prompt + data and hands the result
+  to the clipboard and to a new tab, per the UX agreed on: no preview, one click
+  copies and opens.
+
+  Opened via the global window.openAiModal(scope, filePath) - scope is "project"
+  (default; matches the original single-purpose behavior) or "file" (filePath
+  required, e.g. from drawer_fragment.html's "Ask AI about this file" button). Kept
+  as one shared modal/flow rather than a second copy of this file, since the two
+  scopes differ only in *which* export object backs the purpose list and payload -
+  the picking-a-purpose, Hebrew toggle, and send-to-target UX are identical.
+
+  Reuses the existing dark-theme CSS custom properties from project_map.html
+  (--bg, --panel, --text, etc.) rather than redefining a color palette, so the
+  modal looks native to the app instead of like a bolted-on component.
+-->
+<style>
+  #aiModalOverlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+    z-index: 200;
+    align-items: center;
+    justify-content: center;
+  }
+  #aiModalOverlay.open { display: flex; }
+
+  #aiModal {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    width: 480px;
+    max-width: 92vw;
+    max-height: 86vh;
+    overflow-y: auto;
+    padding: 20px 22px 22px;
+    font-family: var(--sans);
+    color: var(--text);
+  }
+
+  #aiModal .ai-modal-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 4px;
+  }
+  #aiModal .ai-modal-head h2 {
+    font-size: 16px;
+    font-weight: 600;
+    margin: 0;
+  }
+  #aiModal .ai-modal-close {
+    background: none;
+    border: none;
+    color: var(--muted);
+    font-size: 18px;
+    cursor: pointer;
+    line-height: 1;
+    padding: 4px;
+  }
+  #aiModal .ai-modal-close:hover { color: var(--text); }
+
+  #aiModal .ai-modal-sub {
+    font-size: 12.5px;
+    color: var(--muted);
+    margin: 2px 0 18px;
+  }
+
+  #aiModal .ai-section-label {
+    font-size: 11.5px;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    color: var(--muted-2);
+    margin: 0 0 8px;
+  }
+
+  #aiPurposeList {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 20px;
+  }
+  .ai-purpose-option {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 11px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--panel-2);
+    cursor: pointer;
+    text-align: left;
+  }
+  .ai-purpose-option:hover { border-color: var(--muted-2); }
+  .ai-purpose-option.selected { border-color: var(--teal); background: var(--teal-dim); }
+  .ai-purpose-option input[type="radio"] { margin-top: 3px; accent-color: var(--teal); flex-shrink: 0; }
+  .ai-purpose-option .ai-purpose-text { display: flex; flex-direction: column; gap: 2px; }
+  .ai-purpose-option .ai-purpose-title { font-size: 13.5px; font-weight: 600; }
+  .ai-purpose-option .ai-purpose-desc { font-size: 12px; color: var(--muted); }
+
+  #aiTargetGrid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+
+  #aiIssueContainer {
+    margin-bottom: 18px;
+  }
+  #aiIssueField {
+    width: 100%;
+    box-sizing: border-box;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 13px;
+    padding: 9px 12px;
+    resize: vertical;
+  }
+  #aiIssueField::placeholder { color: var(--muted); }
+  #aiIssueField:focus { outline: none; border-color: var(--teal); }
+
+  .ai-hebrew-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 16px 0 18px;
+    padding: 9px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--panel-2);
+    cursor: pointer;
+    font-size: 13px;
+  }
+  .ai-hebrew-toggle input[type="checkbox"] { accent-color: var(--teal); cursor: pointer; }
+  .ai-hebrew-toggle span { user-select: none; }
+  .ai-target-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--panel-2);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  .ai-target-btn:hover:not(:disabled) { border-color: var(--teal); background: #232C38; }
+  .ai-target-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .ai-target-btn .ai-target-icon { font-size: 15px; }
+
+  #aiCopyStatus {
+    margin-top: 14px;
+    font-size: 12px;
+    color: var(--teal);
+    min-height: 16px;
+  }
+  #aiCopyStatus.error { color: var(--danger); }
+</style>
+
+<div id="aiModalOverlay">
+  <div id="aiModal" role="dialog" aria-modal="true" aria-labelledby="aiModalTitle">
+    <div class="ai-modal-head">
+      <h2 id="aiModalTitle">🤖 Ask AI about this project</h2>
+      <button class="ai-modal-close" id="aiModalClose" aria-label="Close">✕</button>
+    </div>
+    <p class="ai-modal-sub" id="aiModalSub">Pick what you want, then pick where to send it. The prompt and project data are copied to your clipboard and the chat opens in a new tab — just paste.</p>
+
+    <div class="ai-section-label">What do you need?</div>
+    <div id="aiPurposeList"><!-- populated by JS from AI_EXPORTS keys --></div>
+
+    <div id="aiIssueContainer" style="display:none;">
+      <div class="ai-section-label" id="aiIssueLabel">Describe the problem (optional)</div>
+      <textarea id="aiIssueField" rows="3" placeholder=""></textarea>
+    </div>
+
+    <label class="ai-hebrew-toggle">
+      <input type="checkbox" id="aiHebrewToggle">
+      <span>החזר תשובה בעברית</span>
+    </label>
+
+    <div class="ai-section-label">Send to</div>
+    <div id="aiTargetGrid"><!-- populated by JS --></div>
+
+    <div id="aiCopyStatus"></div>
+  </div>
+</div>
+
+<script>
+(function () {
+  // Purpose display metadata. Keys must match AI_EXPORTS/AI_FILE_EXPORTS + AI_PROMPTS
+  // (injected by report.py) - a purpose key present in an exports object but missing
+  // here still renders (falls back to the raw key as its title) rather than being
+  // silently dropped, so a new purpose added on the Python side never disappears
+  // from the UI just because this file wasn't updated in lockstep. Split into two
+  // objects (rather than one, scope-agnostic) because a purpose's *label* is worth
+  // phrasing differently depending on scope, and in practice project-scope and
+  // file-scope purposes don't even share keys anymore (project: "debug",
+  // "business_doc"; file: "file_summary", "file_debug") - PROJECT_PURPOSE_META and
+  // FILE_PURPOSE_META are looked up separately based on the modal's current scope.
+  var PROJECT_PURPOSE_META = {
+    debug: {
+      title: 'Debug the architecture',
+      desc: 'Check control-flow structure, dependency graph, and error-handling consistency across the project.'
+    },
+    business_doc: {
+      title: 'Write a spec document',
+      desc: 'Explain what this project does, for a non-developer reader.'
+    }
+  };
+  var FILE_PURPOSE_META = {
+    file_summary: {
+      title: 'Summarize this file',
+      desc: 'What this file does and exactly how its logic flows, in plain terms.'
+    },
+    file_debug: {
+      title: 'Debug this file',
+      desc: 'Diagnose a problem you describe below, or scan for common issues if you leave it blank.'
+    }
+  };
+
+  // Optional free-text field, keyed by purpose: all four accept a note but
+  // interpret it in one of two ways - "debug"/"file_debug" as a lead or reported
+  // symptom to investigate, "business_doc"/"file_summary" as a focus/audience to
+  // emphasize while still explaining everything. Mirrors the header selection in
+  // prompts.py's build_full_payload - if you change one, change the other, since
+  // this file builds its own payload independently rather than calling into Python.
+  var NOTES_META = {
+    debug: {
+      label: 'Add context or a suspicion (optional)',
+      placeholder: 'e.g. I suspect duplicated logic between the Invoice and Payment folders, or the project struggles under load. Leave blank for an unguided review.',
+      header: '## Additional context'
+    },
+    business_doc: {
+      label: 'Add focus or audience notes (optional)',
+      placeholder: 'e.g. this is for the compliance team - focus on the approval steps and skip UI detail. Leave blank for a general reader.',
+      header: '## Additional context'
+    },
+    file_summary: {
+      label: 'Add focus or audience notes (optional)',
+      placeholder: 'e.g. focus on the call to PaymentService, or explain this for someone unfamiliar with our naming conventions. Leave blank for a general explanation.',
+      header: '## Additional context'
+    },
+    file_debug: {
+      label: 'Describe the problem (optional)',
+      placeholder: "What's going wrong? e.g. the CustomerId Out argument comes back empty when the Else branch runs. Leave blank for a general check.",
+      header: '## Reported issue'
+    }
+  };
+
+  // AI chat targets. Each url() receives nothing (these are plain chat landing
+  // pages, not URL-parameter prefill endpoints - see note below) and just needs to
+  // open while the clipboard already holds the payload, per the agreed UX (copy +
+  // open, no preview, user pastes manually).
+  var AI_TARGETS = [
+    { key: 'chatgpt', label: 'ChatGPT', icon: '💬', url: 'https://chat.openai.com/' },
+    { key: 'claude', label: 'Claude', icon: '✳️', url: 'https://claude.ai/new' },
+    { key: 'gemini', label: 'Gemini', icon: '✦', url: 'https://gemini.google.com/app' }
+  ];
+
+  // Appended to the payload (not to PROMPTS/AI_EXPORTS themselves - those stay
+  // English by design, see prompts.py) when the Hebrew checkbox is checked. A
+  // single instruction line rather than translating the schema explainer or task
+  // instructions: the AI reads the schema and does the analysis in English (which
+  // it's best at), and only the final reply language changes.
+  var HEBREW_INSTRUCTION = 'IMPORTANT: Write your entire response in Hebrew (עברית), regardless of the language used above. Keep any code, file paths, and technical identifiers (activity tag names, variable names) in their original form.';
+
+  var selectedPurpose = null;
+  // Current modal scope/target file - set by openAiModal(), read by everything
+  // below that needs to know which export object and copy to use. 'project' with
+  // currentFilePath === null is the original (and default) behavior.
+  var currentScope = 'project';
+  var currentFilePath = null;
+
+  function getExports() {
+    if (currentScope === 'file') {
+      var fileExports = (typeof AI_FILE_EXPORTS !== 'undefined') ? AI_FILE_EXPORTS : {};
+      return fileExports[currentFilePath] || {};
+    }
+    return (typeof AI_EXPORTS !== 'undefined') ? AI_EXPORTS : {};
+  }
+  function getPrompts() { return (typeof AI_PROMPTS !== 'undefined') ? AI_PROMPTS : {}; }
+  function getPurposeMeta() { return currentScope === 'file' ? FILE_PURPOSE_META : PROJECT_PURPOSE_META; }
+
+  function buildPurposeList() {
+    var container = document.getElementById('aiPurposeList');
+    container.innerHTML = '';
+    var exports = getExports();
+    var keys = Object.keys(exports);
+    var purposeMeta = getPurposeMeta();
+
+    if (keys.length === 0) {
+      var emptyMsg = currentScope === 'file'
+        ? 'No AI export data available for this file. Re-generate the report from the scanner to enable this panel.'
+        : 'No AI export data available for this project map. Re-generate it from the scanner to enable this panel.';
+      container.innerHTML = '<div style="font-size:12.5px;color:var(--muted)">' + emptyMsg + '</div>';
+      selectedPurpose = null;
+      return;
+    }
+
+    keys.forEach(function (key, idx) {
+      var meta = purposeMeta[key] || { title: key, desc: '' };
+      var label = document.createElement('label');
+      label.className = 'ai-purpose-option' + (idx === 0 ? ' selected' : '');
+      label.innerHTML =
+        '<input type="radio" name="aiPurpose" value="' + key + '"' + (idx === 0 ? ' checked' : '') + '>' +
+        '<span class="ai-purpose-text">' +
+          '<span class="ai-purpose-title">' + meta.title + '</span>' +
+          '<span class="ai-purpose-desc">' + meta.desc + '</span>' +
+        '</span>';
+      label.addEventListener('click', function () {
+        document.querySelectorAll('.ai-purpose-option').forEach(function (el) { el.classList.remove('selected'); });
+        label.classList.add('selected');
+        selectedPurpose = key;
+        updateIssueVisibility();
+      });
+      container.appendChild(label);
+      if (idx === 0) selectedPurpose = key;
+    });
+    updateIssueVisibility();
+  }
+
+  // Shown/labeled per the selected purpose via NOTES_META above - hidden entirely
+  // (not just left empty) for purposes with no entry there, so the field never
+  // implies relevance where it has none.
+  function updateIssueVisibility() {
+    var container = document.getElementById('aiIssueContainer');
+    var labelEl = document.getElementById('aiIssueLabel');
+    var field = document.getElementById('aiIssueField');
+    if (!container) return;
+    var meta = NOTES_META[selectedPurpose];
+    if (meta) {
+      container.style.display = 'block';
+      labelEl.textContent = meta.label;
+      field.placeholder = meta.placeholder;
+    } else {
+      container.style.display = 'none';
+    }
+  }
+
+  function buildTargetGrid() {
+    var grid = document.getElementById('aiTargetGrid');
+    grid.innerHTML = '';
+    AI_TARGETS.forEach(function (target) {
+      var btn = document.createElement('button');
+      btn.className = 'ai-target-btn';
+      btn.innerHTML = '<span class="ai-target-icon">' + target.icon + '</span>' + target.label;
+      btn.addEventListener('click', function () { handleTargetClick(target); });
+      grid.appendChild(btn);
+    });
+  }
+
+  function setStatus(msg, isError) {
+    var el = document.getElementById('aiCopyStatus');
+    el.textContent = msg;
+    el.className = isError ? 'error' : '';
+  }
+
+  async function handleTargetClick(target) {
+    if (!selectedPurpose) {
+      setStatus('Pick what you need first.', true);
+      return;
+    }
+    var prompts = getPrompts();
+    var exports = getExports();
+    var promptText = prompts[selectedPurpose] || '';
+    var dataText = exports[selectedPurpose] || '';
+
+    var hebrewChecked = document.getElementById('aiHebrewToggle').checked;
+
+    // Optional user-provided note, shown/labeled per NOTES_META above and mirrored
+    // here with the same header choice as build_full_payload in prompts.py - only
+    // included when the currently selected purpose accepts one AND the user
+    // actually typed something.
+    var issueField = document.getElementById('aiIssueField');
+    var notesMeta = NOTES_META[selectedPurpose];
+    var issueText = (notesMeta && issueField) ? issueField.value.trim() : '';
+    var issueBlock = issueText ? notesMeta.header + '\n' + issueText + '\n\n' : '';
+
+    var payload = promptText + (hebrewChecked ? '\n\n' + HEBREW_INSTRUCTION : '') + '\n\n' + issueBlock + '---\n\n' + dataText;
+
+    try {
+      await navigator.clipboard.writeText(payload);
+      setStatus('Copied to clipboard \u2014 opening ' + target.label + '\u2026');
+    } catch (err) {
+      // Clipboard API can fail (permissions, non-HTTPS context, older browser) -
+      // still open the chat so the user isn't blocked, but tell them the copy
+      // didn't happen so they don't paste stale/empty content.
+      setStatus('Could not copy automatically \u2014 opening ' + target.label + ' anyway. Copy the export manually.', true);
+    }
+    window.open(target.url, '_blank', 'noopener');
+  }
+
+  function updateModalCopy() {
+    var title = document.getElementById('aiModalTitle');
+    var sub = document.getElementById('aiModalSub');
+    if (currentScope === 'file') {
+      title.textContent = '🤖 Ask AI about ' + (currentFilePath || 'this file');
+      sub.textContent = 'Pick what you want, then pick where to send it. The prompt and this file\u2019s export are copied to your clipboard and the chat opens in a new tab — just paste.';
+    } else {
+      title.textContent = '🤖 Ask AI about this project';
+      sub.textContent = 'Pick what you want, then pick where to send it. The prompt and project data are copied to your clipboard and the chat opens in a new tab — just paste.';
+    }
+  }
+
+  // Global entry point - called by askAiBtn here (scope 'project') and by the
+  // drawer's "Ask AI about this file" button (scope 'file', with the currently
+  // open file's relative_path). Rebuilds the purpose list on every open (rather
+  // than once at DOMContentLoaded) since the available purposes/labels can differ
+  // by scope and, in file scope, by *which* file was last opened.
+  window.openAiModal = function (scope, filePath) {
+    currentScope = (scope === 'file') ? 'file' : 'project';
+    currentFilePath = currentScope === 'file' ? filePath : null;
+    updateModalCopy();
+    buildPurposeList();
+    // Clear any previously typed symptom text on every open - it described a
+    // problem in whichever file/scope was open last time, not necessarily this one.
+    var issueField = document.getElementById('aiIssueField');
+    if (issueField) issueField.value = '';
+    document.getElementById('aiModalOverlay').classList.add('open');
+    setStatus('');
+  };
+
+  function closeModal() {
+    document.getElementById('aiModalOverlay').classList.remove('open');
+  }
+
+  document.addEventListener('DOMContentLoaded', function () {
+    buildTargetGrid();
+
+    var openBtn = document.getElementById('askAiBtn');
+    if (openBtn) openBtn.addEventListener('click', function () { window.openAiModal('project'); });
+
+    document.getElementById('aiModalClose').addEventListener('click', closeModal);
+    document.getElementById('aiModalOverlay').addEventListener('click', function (e) {
+      if (e.target.id === 'aiModalOverlay') closeModal();
+    });
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') closeModal();
+    });
+  });
+})();
+</script>
